@@ -39,6 +39,28 @@ const server = http.createServer(app);
 if (process.env.PROXIED === 'true') app.set('trust proxy', true);
 app.disable('x-powered-by');
 
+/*
+ * Compatibility with clients configured for the first version of the server,
+ * where signaling lived directly at /peerjs (PeerJS path "/"): rewrite those
+ * URLs to the current /peerjs/peerjs mount, both for plain HTTP requests and
+ * for the WebSocket upgrade (which never reaches Express).
+ */
+function legacyPeerUrl(url) {
+  const q = url.indexOf('?');
+  const path = q < 0 ? url : url.slice(0, q);
+  const query = q < 0 ? '' : url.slice(q);
+  if (path === '/peerjs' || path === '/peerjs/') return '/peerjs/peerjs' + query;
+  if (path === '/peerjs/id') return '/peerjs/peerjs/id' + query;
+  return url;
+}
+app.use((req, res, next) => {
+  req.url = legacyPeerUrl(req.url);
+  next();
+});
+server.prependListener('upgrade', (req) => {
+  req.url = legacyPeerUrl(req.url);
+});
+
 /* ------------------------------------------------------------------ CORS */
 
 app.use('/api', (req, res, next) => {
