@@ -35,6 +35,7 @@
   <!--<link rel="apple-touch-icon-precomposed" href=".png" />-->
 
   <link rel="stylesheet" type="text/css" href="style.css" />
+  <link rel="stylesheet" type="text/css" href="multiplayer/mp.css" />
 
   <script>
     (function () {
@@ -92,6 +93,19 @@
     </div>
   </div>
 
+
+  <!-- Multiplayer (loaded before the engine so game audio can be streamed). -->
+  <script src="multiplayer/mp-config.js" charset="utf-8"></script>
+  <script src="multiplayer/vendor/peerjs.min.js" charset="utf-8"></script>
+  <script src="multiplayer/mp-core.js" charset="utf-8"></script>
+  <script src="multiplayer/mp-audio.js" charset="utf-8"></script>
+  <script src="multiplayer/mp-net.js" charset="utf-8"></script>
+  <script src="multiplayer/mp-game.js" charset="utf-8"></script>
+  <script src="multiplayer/mp-skin.js" charset="utf-8"></script>
+  <script src="multiplayer/mp-ui.js" charset="utf-8"></script>
+  <script src="multiplayer/mp-modes.js" charset="utf-8"></script>
+  <script src="multiplayer/mp-app.js" charset="utf-8"></script>
+  <script src="multiplayer/mp-main.js" charset="utf-8"></script>
 
   <!-- Polyfills bundle. -->
 
