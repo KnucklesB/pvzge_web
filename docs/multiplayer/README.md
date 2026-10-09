@@ -15,7 +15,13 @@ bundle is not modified.
   game's own code paths (`LnC.PlaceUIPlant`, `LnC.removePlant`, `LnC.plantfood`,
   `zombies.spawnZombieFromLaneByType`, drop collection on hover), temporarily
   swapping the UI's current selection so the host's own selection is untouched.
-- **Signaling** uses PeerJS (public cloud by default, or `/server`).
+- **Survival** gives each player their own lawn: both run the generated level
+  locally and stream it to the other (picture-in-picture).
+- **Seed chooser:** when the guest picks plants, their clicks/scrolls are
+  replayed as DOM events on the host's canvas and the host's real mouse is held
+  back (`hooks.remoteChooser`).
+- **Signaling** uses PeerJS (public cloud by default, or `/server`), which also
+  serves the accounts / cloud saves / rooms / history API.
 
 ## Files
 
@@ -24,17 +30,21 @@ bundle is not modified.
 | `mp-config.js` | Signaling server / ICE configuration (overridable). |
 | `mp-core.js` | Namespace, events, storage, utilities, translations (en / pt / zh, switchable in the lobby; defaults to the game's language). |
 | `mp-audio.js` | Routes WebAudio through a master gain + `MediaStream` tap. Must load before the engine. |
-| `mp-net.js` | `Session`: rooms, handshake, heartbeat/RTT, media stream and bitrate tuning. |
+| `mp-net.js` | `Session`: rooms, handshake, heartbeat/RTT, media streams (both directions) and bitrate tuning. |
+| `mp-api.js` | REST client for the multiplayer server (accounts, saves, rooms, matches). |
+| `mp-cloud.js` | Mirrors the game's localStorage profiles to the logged-in account. |
 | `mp-game.js` | Bridge to the game internals: modules, coordinates, actions, hooks. |
 | `mp-skin.js` | Cuts the game's own sprites/fonts at runtime for the HTML UI. |
 | `mp-ui.js` / `mp.css` | Lobby, HUD, overlays, stream viewer, results, chat, toasts. |
-| `mp-modes.js` | Mode definitions, generated levels, plant/zombie seats, `Match`. |
+| `mp-modes.js` | Options, arenas/zombie decks, generated levels, plant/zombie seats, `SoloRun`, `Match`. |
 | `mp-app.js` | Controller tying session, lobby, match and overlays together; main menu button. |
 | `vendor/peerjs.min.js` | PeerJS 1.5.4 (MIT). |
 
 ## Protocol (data channel, JSON)
 
-- Guest → host: `hello`, `ready`, `ptr {x,y}`, `down {x,y,b}`, `key {k}`, `chat`.
+- Guest → host: `hello` (+ account ticket), `ready`, `zdeck`, `ptr {x,y}`,
+  `down {x,y,b}`, `wheel {x,y,dy}`, `key {k}`, `sv` (own Survival run),
+  `to-room`, `end-request`, `chat`.
 - Host → guest: `welcome`, `reject`, `lobby`, `start`, `hud` (10 Hz), `layout`
   (packet/grid rectangles), `toast`, `end`, `lobby-return`, `chat`.
 - Both: `ping`/`pong`, `bye`.
@@ -50,8 +60,24 @@ If a game update breaks multiplayer, check these first (`mp-game.js`):
 `UIInGame` (`index`, `currentCF`, `tryChangingIndex`, `plantInHand`, `paused`,
 `SBZombieCards`, `SBZombieCardsSlot`, `s2xButton`, `speedUp`), `LnC`
 methods above, `Square` (`getLnC`, `judgeLIndex/judgeCIndex`, `lawnRec`),
-`dropping.prototype.characterUpdate`, `SandBoxZombieCards`, `zombies`.
+`dropping.prototype.characterUpdate`, `SandBoxZombieCards`, `zombies`,
+`LevelPlay.component.isSeedChooserMode`, `AllPlayerProperties.savePP` and the
+`PvZ2_PlayerProperties` / `PvZ2_Settings` localStorage keys.
 
-Testing locally: serve `docs/`, run `server/` (`HOST=127.0.0.1 PORT=9000 node index.js`)
-and open two browser windows with `?mp_server=http://127.0.0.1:9000/`.
+## Server API (`/server`)
+
+| Method | Path | |
+| --- | --- | --- |
+| POST | `/api/auth/register`, `/api/auth/login` | `{username, password}` → `{token, user}` |
+| POST | `/api/auth/logout`, `/api/auth/password` | bearer token |
+| GET | `/api/auth/me`, `/api/auth/ticket` | profile; signed ticket proving the account to the host |
+| GET/PUT | `/api/save` | cloud save (`base` timestamp for conflict detection) |
+| GET | `/api/rooms` | public rooms (hosts heartbeat with `PUT /api/rooms/:code` + secret key) |
+| GET/POST | `/api/matches` | history; only the live room's host (key) can report a result |
+
+Passwords are hashed with scrypt, sessions are random bearer tokens stored
+hashed, and auth/save endpoints are rate limited.
+
+Testing locally: serve `docs/`, run `server/` (`HOST=127.0.0.1 PORT=9000 npm start`)
+and open two browser windows with `?mp_server=http://127.0.0.1:9000`.
 Add `&mp_debug=1` for logs.

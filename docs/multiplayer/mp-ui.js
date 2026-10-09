@@ -68,7 +68,10 @@
   function iconEl(name, cls) {
     var span = el('span' + (cls ? '.' + cls : ''));
     span.innerHTML = ICONS[name] || '';
-    return span.firstChild || span;
+    var svg = span.firstChild;
+    if (!svg) return span;
+    if (cls) svg.classList.add(cls);
+    return svg;
   }
 
   /* ------------------------------------------------------------ toasts */
@@ -154,7 +157,6 @@
 
   var lobbyState = null;
   var lobbyOpen = false;
-  var homeNodes = null;
 
   UI.isLobbyOpen = function () {
     return lobbyOpen;
@@ -162,39 +164,53 @@
 
   UI.openLobby = function (state) {
     lobbyOpen = true;
-    homeNodes = null;
+    lobbyState = null;
     UI.renderLobby(state);
   };
 
   UI.closeLobby = function () {
     lobbyOpen = false;
-    homeNodes = null;
     lobbyState = null;
     closeModal();
   };
 
-  // Full re-render (e.g. after a language change), keeping typed values.
   UI.rebuildLobby = function (state) {
-    if (!lobbyOpen) return;
-    if (homeNodes && state.view === 'home') {
-      state.name = homeNodes.name.value;
-      state.code = homeNodes.code.value;
-    }
-    homeNodes = null;
-    lobbyState = null;
-    UI.renderLobby(state);
+    if (lobbyOpen) UI.renderLobby(state);
   };
+
+  // Re-rendering keeps what the player typed, the focus and scroll positions:
+  // inputs carry data-k, scrollable areas data-scroll.
+  function snapshot() {
+    var snap = { values: {}, scroll: {}, focus: null };
+    if (!layers || !layers.modal) return snap;
+    layers.modal.querySelectorAll('[data-k]').forEach(function (i) {
+      snap.values[i.getAttribute('data-k')] = i.value;
+      if (document.activeElement === i) snap.focus = i.getAttribute('data-k');
+    });
+    layers.modal.querySelectorAll('[data-scroll]').forEach(function (s) {
+      snap.scroll[s.getAttribute('data-scroll')] = s.scrollTop;
+    });
+    return snap;
+  }
+
+  function restore(snap) {
+    layers.modal.querySelectorAll('[data-k]').forEach(function (i) {
+      var k = i.getAttribute('data-k');
+      if (snap.values[k] != null && !i.readOnly) i.value = snap.values[k];
+      if (snap.focus === k) i.focus();
+    });
+    layers.modal.querySelectorAll('[data-scroll]').forEach(function (s) {
+      var k = s.getAttribute('data-scroll');
+      if (snap.scroll[k] != null) s.scrollTop = snap.scroll[k];
+    });
+  }
 
   UI.renderLobby = function (state) {
     if (!lobbyOpen || !root) return;
-    var prevView = lobbyState && lobbyState.view;
+    var sameView = lobbyState && lobbyState.view === state.view && lobbyState.tab === state.tab;
+    var snap = sameView ? snapshot() : null;
     lobbyState = state;
-    if (state.view === 'home' && prevView === 'home' && homeNodes) {
-      homeNodes.error.textContent = state.error ? t(state.error) : '';
-      return;
-    }
-    homeNodes = null;
-    var win = el('div.mp-window.mp-interactive');
+    var win = el('div.mp-window.mp-interactive' + (state.view === 'home' ? '.mp-home-window' : ''));
     var close = el('button.mp-close', { title: t('close'), 'aria-label': t('close'), onclick: function () {
       call('closeLobby');
     } });
@@ -223,16 +239,46 @@
     bd.addEventListener('wheel', function (e) {
       e.stopPropagation();
     });
+    if (snap) restore(snap);
   };
 
-  function renderHome(win, state) {
-    win.appendChild(el('div.mp-window-sub', { text: t('lobby_subtitle') }));
-    var name = el('input.mp-input', { maxlength: 16, placeholder: t('your_name'), value: state.name || '', 'aria-label': t('your_name') });
-    MP.util.shieldInput(name);
-    win.appendChild(el('div.mp-name-row', null, [el('div.mp-avatar'), name]));
+  function input(cls, attrs) {
+    var i = el('input.mp-input' + (cls ? '.' + cls : ''), attrs);
+    MP.util.shieldInput(i);
+    return i;
+  }
 
-    var code = el('input.mp-input.mp-code', { maxlength: 5, placeholder: t('room_code_ph'), value: state.code || '', 'aria-label': t('room_code') });
-    MP.util.shieldInput(code);
+  var TABS = ['play', 'rooms', 'history', 'account'];
+
+  function renderHome(win, state) {
+    var tabs = el('div.mp-tabs');
+    TABS.forEach(function (k) {
+      tabs.appendChild(
+        el('button.mp-tab' + (state.tab === k ? '.mp-on' : ''), {
+          text: t('tab_' + k),
+          onclick: function () {
+            if (state.tab !== k) call('tab', k);
+          },
+        }),
+      );
+    });
+    win.appendChild(tabs);
+    var body = el('div.mp-tab-body');
+    win.appendChild(body);
+    if (state.tab === 'rooms') renderRoomsTab(body, state);
+    else if (state.tab === 'history') renderHistoryTab(body, state);
+    else if (state.tab === 'account') renderAccountTab(body, state);
+    else renderPlayTab(body, state);
+  }
+
+  function renderPlayTab(body, state) {
+    body.appendChild(el('div.mp-window-sub', { text: t('lobby_subtitle') }));
+    var name = input(null, { 'data-k': 'name', maxlength: 20, placeholder: t('your_name'), value: state.name || '', 'aria-label': t('your_name'), readonly: state.nameLocked });
+    var row = el('div.mp-name-row', null, [el('div.mp-avatar'), name]);
+    if (state.nameLocked) row.appendChild(el('span.mp-verified', { title: t('account_verified'), text: '✓' }));
+    body.appendChild(row);
+
+    var code = input('mp-code', { 'data-k': 'code', maxlength: 5, placeholder: t('room_code_ph'), value: state.code || '', 'aria-label': t('room_code') });
     code.addEventListener('input', function () {
       code.value = code.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
     });
@@ -245,24 +291,198 @@
     code.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') join.click();
     });
-
-    var left = el('div.mp-panel', null, [
-      el('div.mp-panel-title', { text: t('create_room') }),
-      el('div.mp-home-desc', { text: t('share_code') }),
-      create,
-    ]);
-    var right = el('div.mp-panel', null, [
-      el('div.mp-panel-title', { text: t('room_code') }),
-      code,
-      join,
-    ]);
-    win.appendChild(el('div.mp-home', null, [left, el('div.mp-home-or', { text: t('or') }), right]));
-    var error = el('div.mp-error', { text: state.error ? t(state.error) : '' });
-    win.appendChild(error);
-    homeNodes = { name: name, code: code, error: error };
+    var left = el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('create_room') }), el('div.mp-home-desc', { text: t('share_code') }), create]);
+    var right = el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('room_code') }), code, join]);
+    body.appendChild(el('div.mp-home', null, [left, el('div.mp-home-or', { text: t('or') }), right]));
+    body.appendChild(el('div.mp-error', { text: state.error ? t(state.error) : '' }));
+    if (!state.nameLocked && state.online) {
+      body.appendChild(
+        el('div.mp-note.mp-center', null, [
+          t('login_hint') + ' ',
+          el('a.mp-link', { href: '#', text: t('tab_account'), onclick: function (e) {
+            e.preventDefault();
+            call('tab', 'account');
+          } }),
+        ]),
+      );
+    }
     setTimeout(function () {
-      (state.code ? code : name).focus();
+      if (!document.activeElement || document.activeElement === document.body) (state.code ? code : name).focus();
     }, 50);
+  }
+
+  function offlineNotice(body) {
+    body.appendChild(
+      el('div.mp-panel.mp-empty-state', null, [el('div.mp-empty-title', { text: t('online_unavailable') }), el('div.mp-note', { text: t('online_unavailable_desc') })]),
+    );
+  }
+
+  function timeAgo(ts) {
+    var s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    if (s < 60) return t('ago_s', { n: s });
+    if (s < 3600) return t('ago_m', { n: Math.floor(s / 60) });
+    if (s < 86400) return t('ago_h', { n: Math.floor(s / 3600) });
+    return t('ago_d', { n: Math.floor(s / 86400) });
+  }
+
+  function stageLabel(k) {
+    return MP.STAGES[k] ? t(MP.STAGES[k].label) : '';
+  }
+
+  function renderRoomsTab(body, state) {
+    if (!state.online) return offlineNotice(body);
+    var r = state.rooms;
+    var head = el('div.mp-list-head', null, [
+      el('div.mp-panel-title', { text: t('public_rooms') }),
+      el('button.mp-btn.mp-small.mp-brown', { text: r.loading ? t('loading') : t('refresh'), disabled: r.loading, onclick: function () {
+        call('refreshRooms');
+      } }),
+    ]);
+    var list = el('div.mp-list.mp-scroll', { 'data-scroll': 'rooms' });
+    if (r.error) list.appendChild(el('div.mp-error', { text: t(r.error) }));
+    else if (!r.list.length) list.appendChild(el('div.mp-empty-state', null, [el('div.mp-empty-title', { text: r.loading ? t('loading') : t('no_rooms') }), el('div.mp-note', { text: t('no_rooms_desc') })]));
+    r.list.forEach(function (room) {
+      var full = room.players >= room.max || room.status === 'playing';
+      var item = el('div.mp-list-item', null, [
+        iconEl(room.mode || 'coop', 'mp-list-icon'),
+        el('div.mp-list-main', null, [
+          el('div.mp-list-title', null, [room.host + ' ', room.hasAccount ? el('span.mp-verified', { text: '✓', title: t('account_verified') }) : null]),
+          el('div.mp-list-sub', { text: t('mode_' + room.mode) + (room.mode !== 'coop' && room.stage ? ' • ' + stageLabel(room.stage) : '') + ' • ' + room.code }),
+        ]),
+        el('div.mp-list-meta', null, [
+          el('span.mp-player-tag' + (room.status === 'playing' ? '' : '.mp-ok'), { text: room.status === 'playing' ? t('status_playing') : t('status_waiting') }),
+          el('div.mp-list-sub', { text: room.players + '/' + room.max }),
+        ]),
+        el('button.mp-btn.mp-small' + (full ? '.mp-brown' : '.mp-green'), {
+          text: t('join_room'),
+          disabled: full,
+          onclick: function () {
+            call('joinRoom', room.code);
+          },
+        }),
+      ]);
+      list.appendChild(item);
+    });
+    body.appendChild(el('div.mp-panel.mp-list-panel', null, [head, list]));
+    body.appendChild(el('div.mp-error', { text: state.error ? t(state.error) : '' }));
+  }
+
+  function renderHistoryTab(body, state) {
+    if (!state.online) return offlineNotice(body);
+    var h = state.history;
+    var filters = el('div.mp-seg', null, [
+      el('button' + (!h.mine ? '.mp-on' : ''), { text: t('history_all'), onclick: function () {
+        call('refreshHistory', false);
+      } }),
+      el('button' + (h.mine ? '.mp-on' : ''), { text: t('history_mine'), disabled: !state.user, title: state.user ? null : t('login_needed'), onclick: function () {
+        call('refreshHistory', true);
+      } }),
+    ]);
+    var head = el('div.mp-list-head', null, [el('div.mp-panel-title', { text: t('recent_matches') }), filters]);
+    var list = el('div.mp-list.mp-scroll', { 'data-scroll': 'history' });
+    if (h.error) list.appendChild(el('div.mp-error', { text: t(h.error) }));
+    else if (!h.list.length) list.appendChild(el('div.mp-empty-state', null, [el('div.mp-empty-title', { text: h.loading ? t('loading') : t('no_matches') })]));
+    h.list.forEach(function (m) {
+      var players = el('div.mp-match-players');
+      m.players.forEach(function (p, i) {
+        if (i) players.appendChild(el('span.mp-vs', { text: m.mode === 'versus' ? t('vs') : '+' }));
+        var detail = m.mode === 'versus' ? t('side_' + p.side) : m.mode === 'survival' ? t('wave_short', { n: p.score }) : '';
+        players.appendChild(
+          el('span.mp-match-player' + (p.win ? '.mp-winner' : ''), null, [
+            p.win ? '🏆 ' : '',
+            p.name,
+            p.account ? el('span.mp-verified', { text: '✓' }) : null,
+            detail ? el('small', { text: ' (' + detail + ')' }) : null,
+          ]),
+        );
+      });
+      list.appendChild(
+        el('div.mp-list-item', null, [
+          iconEl(m.mode || 'coop', 'mp-list-icon'),
+          el('div.mp-list-main', null, [players, el('div.mp-list-sub', { text: t('mode_' + m.mode) + (m.stage ? ' • ' + stageLabel(m.stage) : '') + ' • ' + MP.util.formatTime(m.duration) })]),
+          el('div.mp-list-meta', null, [el('div.mp-list-sub', { text: timeAgo(m.at) })]),
+        ]),
+      );
+    });
+    body.appendChild(el('div.mp-panel.mp-list-panel', null, [head, list]));
+  }
+
+  function renderAccountTab(body, state) {
+    if (!state.online) return offlineNotice(body);
+    var acc = state.account;
+    var user = state.user;
+    if (!user) {
+      var reg = acc.mode === 'register';
+      var u = input(null, { 'data-k': 'acc-user', maxlength: 20, placeholder: t('username'), autocomplete: 'username' });
+      var p = input(null, { 'data-k': 'acc-pass', type: 'password', maxlength: 128, placeholder: t('password'), autocomplete: reg ? 'new-password' : 'current-password' });
+      var p2 = reg ? input(null, { 'data-k': 'acc-pass2', type: 'password', maxlength: 128, placeholder: t('password_repeat'), autocomplete: 'new-password' }) : null;
+      var submit = el('button.mp-btn.mp-big' + (reg ? '.mp-green' : ''), {
+        text: acc.busy ? t('loading') : reg ? t('register') : t('login'),
+        disabled: acc.busy,
+        onclick: function () {
+          call('accountSubmit', reg ? 'register' : 'login', u.value.trim(), p.value, p2 ? p2.value : '');
+        },
+      });
+      [u, p, p2].forEach(function (i) {
+        if (i)
+          i.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') submit.click();
+          });
+      });
+      var form = el('div.mp-panel.mp-account-form', null, [
+        el('div.mp-seg.mp-account-switch', null, [
+          el('button' + (!reg ? '.mp-on' : ''), { text: t('login'), onclick: function () {
+            call('accountMode', 'login');
+          } }),
+          el('button' + (reg ? '.mp-on' : ''), { text: t('register'), onclick: function () {
+            call('accountMode', 'register');
+          } }),
+        ]),
+        el('div.mp-field', null, [el('label.mp-label', { text: t('username') }), u]),
+        el('div.mp-field', null, [el('label.mp-label', { text: t('password') }), p]),
+        p2 ? el('div.mp-field', null, [el('label.mp-label', { text: t('password_repeat') }), p2]) : null,
+        submit,
+        el('div.mp-error', { text: acc.error ? t(acc.error) : '' }),
+      ]);
+      var why = el('div.mp-panel.mp-account-why', null, [
+        el('div.mp-panel-title', { text: t('account_why') }),
+        el('ul.mp-bullets', null, [el('li', { text: t('account_why_1') }), el('li', { text: t('account_why_2') }), el('li', { text: t('account_why_3') })]),
+      ]);
+      body.appendChild(el('div.mp-account', null, [form, why]));
+      setTimeout(function () {
+        if (!document.activeElement || document.activeElement === document.body) u.focus();
+      }, 50);
+      return;
+    }
+    var st = user.stats || {};
+    var stat = function (label, value) {
+      return el('div.mp-stat', null, [el('div.mp-stat-v', { text: String(value || 0) }), el('div.mp-stat-l', { text: label })]);
+    };
+    var profile = el('div.mp-panel', null, [
+      el('div.mp-account-name', null, [el('div.mp-avatar'), el('span', { text: user.username }), el('span.mp-verified', { text: '✓' })]),
+      el('div.mp-note', { text: t('member_since', { date: new Date(user.createdAt).toLocaleDateString() }) }),
+      el('div.mp-stats-grid', null, [stat(t('stat_matches'), st.matches), stat(t('stat_wins'), st.wins), stat(t('stat_versus_wins'), st.versusWins), stat(t('stat_best_wave'), st.bestWave)]),
+      el('div.mp-account-actions', null, [el('button.mp-btn.mp-small.mp-red', { text: t('logout'), onclick: function () {
+        call('logout');
+      } })]),
+    ]);
+    var c = state.cloud;
+    var statusText = c.status === 'syncing' ? t('cloud_syncing') : c.status === 'conflict' ? t('cloud_conflict_short') : c.status === 'error' || c.status === 'offline' ? t('cloud_error') : c.lastSync ? t('cloud_synced_at', { when: timeAgo(c.lastSync) }) : t('cloud_never');
+    var cloud = el('div.mp-panel', null, [
+      el('div.mp-panel-title', { text: t('cloud_title') }),
+      el('div.mp-cloud-status.mp-cloud-' + c.status, { text: statusText }),
+      el('div.mp-note', { text: t('cloud_desc') }),
+      el('div.mp-account-actions', null, [
+        el('button.mp-btn.mp-small.mp-green', { text: t('cloud_sync_now'), disabled: c.status === 'syncing', onclick: function () {
+          call('cloudSync');
+        } }),
+        el('button.mp-btn.mp-small.mp-brown', { text: t('cloud_download'), disabled: c.status === 'syncing', onclick: function () {
+          call('cloudDownload');
+        } }),
+      ]),
+    ]);
+    body.appendChild(el('div.mp-account', null, [profile, cloud]));
+    if (acc.notice) body.appendChild(el('div.mp-status', { text: t(acc.notice) }));
   }
 
   function renderBusy(win, state) {
@@ -301,11 +521,47 @@
     return box;
   }
 
+  function optionLabel(def, v) {
+    if (def.fmt === 'minutes') return t('minutes', { n: v });
+    if (def.fmt === 'waves_n') return t('waves_n', { n: v });
+    if (def.fmt === 'mult') return v + 'x';
+    if (def.fmt) return t(def.fmt + v);
+    return String(v);
+  }
+
+  function renderDeck(state, s) {
+    var st = MP.STAGES[s.stage] || MP.STAGES.modern;
+    var deck = s.zdeck || [];
+    var box = el('div.mp-deck');
+    st.zombies.forEach(function (type) {
+      var pos = deck.indexOf(type);
+      var c = MP.zombieCost(type);
+      var chip = el(
+        'button.mp-zchip' + (pos >= 0 ? '.mp-on' : ''),
+        {
+          disabled: !state.canEditDeck,
+          title: MP.zombieName(type),
+          onclick: function () {
+            call('toggleDeck', type);
+          },
+        },
+        [
+          el('span.mp-zchip-name', { text: MP.zombieName(type) }),
+          el('span.mp-zchip-cost', null, [iconEl('brain', 'mp-zchip-brain'), String(c.cost)]),
+          pos >= 0 ? el('span.mp-zchip-n', { text: String(pos + 1) }) : null,
+        ],
+      );
+      chip.style.backgroundImage = 'var(--mp-img-' + st.img + ')';
+      box.appendChild(chip);
+    });
+    return box;
+  }
+
   function renderRoom(win, state) {
     var s = state.settings;
     var edit = state.role === 'host';
 
-    // Left: room code + players.
+    // Left: room code, players, room/stream settings.
     var codeBox = el('div.mp-panel.mp-code-box', null, [
       el('div.mp-panel-title', { text: t('room_code') }),
       el('div.mp-code-value', { text: state.code || '-----' }),
@@ -326,15 +582,51 @@
       }
       var tag = p.role === 'host' ? el('span.mp-player-tag.mp-host', { text: t('host') }) : el('span.mp-player-tag' + (p.ready ? '.mp-ok' : ''), { text: p.ready ? t('is_ready') : t('waiting') });
       players.appendChild(
-        el('div.mp-player', null, [
+        el('div.mp-player' + (p.you ? '.mp-me' : ''), { title: p.you ? p.name + ' (' + t('you') + ')' : p.name }, [
           el('span.mp-player-dot', { style: { background: p.role === 'host' ? 'var(--mp-p1)' : 'var(--mp-p2)' } }),
-          el('span.mp-player-name', { text: p.name, title: p.name }),
-          p.you ? el('span.mp-player-you', { text: t('you') }) : null,
+          el('span.mp-player-name', { text: p.name }),
+          p.account ? el('span.mp-verified', { text: '✓', title: t('account_verified') }) : null,
           tag,
         ]),
       );
     });
     var side = el('div.mp-room-side', null, [codeBox, el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('players') }), players])]);
+    var extra = el('div.mp-panel.mp-extra.mp-scroll', { 'data-scroll': 'extra' });
+    if (edit) {
+      extra.appendChild(el('div.mp-panel-title', { text: t('quality') }));
+      extra.appendChild(
+        segment(
+          ['low', 'medium', 'high'].map(function (q) {
+            return { value: q, label: t('quality_' + q) };
+          }),
+          s.quality,
+          false,
+          function (v) {
+            call('setting', 'quality', v);
+          },
+        ),
+      );
+      if (state.online) {
+        extra.appendChild(el('div.mp-panel-title', { text: t('room_visibility'), style: { marginTop: '10px' } }));
+        extra.appendChild(
+          segment(
+            [
+              { value: true, label: t('room_public') },
+              { value: false, label: t('room_private') },
+            ],
+            s.public !== false,
+            false,
+            function (v) {
+              call('setting', 'public', v);
+            },
+          ),
+        );
+      }
+    } else {
+      extra.appendChild(el('div.mp-note', { text: t('only_host_changes') }));
+    }
+    extra.appendChild(el('div.mp-note', { text: t('controls_hint'), style: { marginTop: '10px' } }));
+    side.appendChild(extra);
 
     // Right: modes + options.
     var modes = el('div.mp-modes');
@@ -363,85 +655,59 @@
         call('setting', key, v);
       };
     }
-    var stageOptions = Object.keys(MP.STAGES).map(function (k) {
-      return { value: k, label: t(MP.STAGES[k].label), img: MP.STAGES[k].img };
-    });
-    if (s.mode === 'versus') {
-      opt(t('arena'), segment(stageOptions, s.stage, !edit, set('stage'), 'mp-stages'));
-      opt(
-        t('your_side'),
-        segment(
-          [
-            { value: 'plants', label: t('side_plants') },
-            { value: 'zombies', label: t('side_zombies') },
-          ],
-          state.role === 'host' ? s.hostSide : s.hostSide === 'plants' ? 'zombies' : 'plants',
-          !edit,
-          function (v) {
-            call('setting', 'hostSide', v);
-          },
-        ),
-      );
-      opt(
-        t('duration'),
-        segment(
-          MP.VERSUS_DURATIONS.map(function (n) {
-            return { value: n, label: t('minutes', { n: n }) };
-          }),
-          s.duration,
-          !edit,
-          set('duration'),
-        ),
-      );
-    } else if (s.mode === 'survival') {
-      opt(t('arena'), segment(stageOptions, s.stage, !edit, set('stage'), 'mp-stages'));
-      opt(
-        t('waves'),
-        segment(
-          MP.SURVIVAL_WAVES.map(function (n) {
-            return { value: n, label: t('waves_n', { n: n }) };
-          }),
-          s.waves,
-          !edit,
-          set('waves'),
-        ),
-      );
-      opt(
-        t('plant_deck'),
-        segment(
-          [
-            { value: 'kit', label: t('deck_kit') },
-            { value: 'collection', label: t('deck_collection') },
-          ],
-          s.deck,
-          !edit,
-          set('deck'),
-        ),
-      );
-    }
-    // Left column: stream quality (host) and the controls cheat sheet.
-    var extra = el('div.mp-panel.mp-extra');
-    if (state.role === 'host') {
-      extra.appendChild(el('div.mp-panel-title', { text: t('quality') }));
-      extra.appendChild(
-        segment(
-          ['low', 'medium', 'high'].map(function (q) {
-            return { value: q, label: t('quality_' + q) };
-          }),
-          s.quality,
-          false,
-          set('quality'),
-        ),
-      );
+    if (s.mode === 'coop') {
+      opts.appendChild(el('div.mp-note', { text: t('coop_options_note') }));
     } else {
-      extra.appendChild(el('div.mp-note', { text: t('only_host_changes') }));
+      var stageOptions = Object.keys(MP.STAGES).map(function (k) {
+        return { value: k, label: t(MP.STAGES[k].label), img: MP.STAGES[k].img };
+      });
+      opt(t('arena'), segment(stageOptions, s.stage, !edit, set('stage'), 'mp-stages'));
+      if (s.mode === 'versus') {
+        opt(
+          t('your_side'),
+          segment(
+            [
+              { value: 'plants', label: t('side_plants') },
+              { value: 'zombies', label: t('side_zombies') },
+            ],
+            state.role === 'host' ? s.hostSide : s.hostSide === 'plants' ? 'zombies' : 'plants',
+            !edit,
+            function (v) {
+              // Shown from the viewer's perspective; stored as the host's side.
+              call('setting', 'hostSide', v);
+            },
+          ),
+        );
+      }
+      Object.keys(MP.OPTIONS).forEach(function (key) {
+        var def = MP.OPTIONS[key];
+        if (def.modes.indexOf(s.mode) < 0) return;
+        opt(
+          t(def.label),
+          segment(
+            def.values.map(function (v) {
+              return { value: v, label: optionLabel(def, v) };
+            }),
+            s[key],
+            !edit,
+            set(key),
+          ),
+        );
+      });
+      if (s.mode === 'versus') {
+        var deckTitle = el('div.mp-panel-title', { text: t('zombie_deck', { n: (s.zdeck || []).length, max: MP.DECK_SIZE }), style: { marginTop: '6px' } });
+        opts.appendChild(deckTitle);
+        opts.appendChild(el('div.mp-note', { text: state.canEditDeck ? t('zombie_deck_you') : t('zombie_deck_other') }));
+        opts.appendChild(renderDeck(state, s));
+        opts.appendChild(el('div.mp-note', { text: t('plants_pick_note') }));
+      } else {
+        opts.appendChild(el('div.mp-note', { text: t('survival_note') }));
+      }
     }
-    extra.appendChild(el('div.mp-note', { text: t('controls_hint'), style: { marginTop: '10px' } }));
-    side.appendChild(extra);
 
     var main = el('div.mp-room-main', null, [
       el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('mode') }), modes]),
-      el('div.mp-panel.mp-scroll', { style: { flex: '1' } }, [el('div.mp-panel-title', { text: t('options') }), opts]),
+      el('div.mp-panel.mp-scroll', { style: { flex: '1' }, 'data-scroll': 'options' }, [el('div.mp-panel-title', { text: t('options') }), opts]),
     ]);
     win.appendChild(el('div.mp-room', null, [side, main]));
 
@@ -518,12 +784,142 @@
     info.players.forEach(function (p) {
       var ping = p.ping != null ? el('span.mp-ping' + (p.ping > 180 ? '.mp-bad' : ''), { text: t('ping', { ms: p.ping }) }) : null;
       badge.appendChild(el('div.mp-badge-row', null, [el('span.mp-player-dot', { style: { background: p.color } }), el('span', { text: p.name }), ping]));
+      if (p.info) badge.appendChild(el('div.mp-badge-info', { text: p.info }));
     });
     if (info.line) badge.appendChild(el('div.mp-badge-info', { text: info.line }));
     badge.appendChild(el('div.mp-note', { text: t('chat_hint') }));
-    if (info.action) {
-      badge.appendChild(el('button.mp-btn.mp-small.mp-red', { text: info.action.label, onclick: info.action.fn }));
+    (info.actions || []).forEach(function (a) {
+      badge.appendChild(el('button.mp-btn.mp-small.' + (a.cls || 'mp-red'), { text: a.label, onclick: a.fn }));
+    });
+  };
+
+  /* --------------------------------------------- survival: partner's lawn */
+
+  var pip = null;
+  UI.showPip = function (stream) {
+    if (!root) return;
+    if (!pip) {
+      var video = el('video', { autoplay: true, playsinline: true });
+      video.muted = true;
+      var name = el('span.mp-pip-name');
+      var info = el('span.mp-pip-info');
+      var sound = el('button.mp-pip-btn', { title: t('pip_sound'), text: '🔇' });
+      var expand = el('button.mp-pip-btn', { title: t('pip_expand'), text: '⤢' });
+      var back = el('button.mp-btn.mp-small.mp-green.mp-pip-back', { text: t('pip_back') });
+      pip = el('div#pvzmp-pip.mp-interactive', null, [video, el('div.mp-pip-bar', null, [el('span.mp-player-dot', { style: { background: 'var(--mp-p2)' } }), name, info, sound, expand]), back]);
+      pip._video = video;
+      pip._name = name;
+      pip._info = info;
+      sound.onclick = function (e) {
+        e.stopPropagation();
+        video.muted = !video.muted;
+        sound.textContent = video.muted ? '🔇' : '🔊';
+        if (!video.muted) video.play().catch(function () {});
+      };
+      expand.onclick = function (e) {
+        e.stopPropagation();
+        UI.expandPip(!pip.classList.contains('mp-pip-expanded'));
+      };
+      back.onclick = function (e) {
+        e.stopPropagation();
+        UI.expandPip(false);
+      };
+      video.ondblclick = function () {
+        UI.expandPip(!pip.classList.contains('mp-pip-expanded'));
+      };
+      pip.addEventListener('mousedown', function (e) {
+        e.stopPropagation();
+      });
+      enablePipDrag(pip, pip.querySelector('.mp-pip-bar'));
+      root.insertBefore(pip, layers.chat);
     }
+    pip._video.srcObject = stream;
+    pip._video.play().catch(function () {});
+  };
+
+  // The window can be dragged by its title bar; the position is remembered.
+  function enablePipDrag(box, handle) {
+    var saved = MP.store.get('pipPos', null);
+    if (saved) {
+      box.style.left = saved.x + 'px';
+      box.style.top = saved.y + 'px';
+      box.style.bottom = 'auto';
+    }
+    var drag = null;
+    handle.addEventListener('pointerdown', function (e) {
+      if (box.classList.contains('mp-pip-expanded') || e.target.tagName === 'BUTTON') return;
+      var r = box.getBoundingClientRect();
+      drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+      handle.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    handle.addEventListener('pointermove', function (e) {
+      if (!drag) return;
+      var x = MP.util.clamp(e.clientX - drag.dx, 0, window.innerWidth - box.offsetWidth);
+      var y = MP.util.clamp(e.clientY - drag.dy, 0, window.innerHeight - box.offsetHeight);
+      box.style.left = x + 'px';
+      box.style.top = y + 'px';
+      box.style.bottom = 'auto';
+    });
+    handle.addEventListener('pointerup', function () {
+      if (!drag) return;
+      drag = null;
+      MP.store.set('pipPos', { x: parseFloat(box.style.left) || 0, y: parseFloat(box.style.top) || 0 });
+    });
+  }
+
+  UI.setPipLabel = function (name, info) {
+    if (!pip) return;
+    pip._name.textContent = name || '';
+    pip._info.textContent = info ? ' • ' + info : '';
+  };
+
+  UI.expandPip = function (on) {
+    if (pip) pip.classList.toggle('mp-pip-expanded', !!on);
+  };
+
+  UI.hidePipExpanded = function () {
+    UI.expandPip(false);
+  };
+
+  UI.hidePip = function () {
+    if (!pip) return;
+    try {
+      pip._video.srcObject = null;
+    } catch (e) {}
+    pip.remove();
+    pip = null;
+  };
+
+  /* ------------------------------------------------- cloud save conflict */
+
+  var dialog = null;
+  UI.showCloudConflict = function (c) {
+    if (!root) return;
+    UI.closeCloudConflict();
+    var when = c && c.cloud && c.cloud.updatedAt ? new Date(c.cloud.updatedAt).toLocaleString() : '';
+    var win = el('div.mp-window.mp-dialog.mp-interactive', null, [
+      el('div.mp-window-title', { text: t('cloud_title') }),
+      el('div.mp-panel', null, [el('div.mp-dialog-text', { text: t('cloud_conflict', { when: when }) })]),
+      el('div.mp-results-actions', null, [
+        el('button.mp-btn.mp-brown', { text: t('cloud_keep_local'), onclick: function () {
+          call('cloudKeepLocal');
+        } }),
+        el('button.mp-btn.mp-green', { text: t('cloud_keep_cloud'), onclick: function () {
+          call('cloudKeepCloud');
+        } }),
+      ]),
+    ]);
+    dialog = el('div.mp-backdrop.mp-dialog-layer', null, win);
+    dialog.addEventListener('mousedown', function (e) {
+      e.stopPropagation();
+    });
+    root.appendChild(dialog);
+  };
+
+  UI.closeCloudConflict = function () {
+    if (dialog) dialog.remove();
+    dialog = null;
   };
 
   /* ----------------------------------------------------------- versus HUD */
@@ -559,6 +955,7 @@
     b.style.transform = 'scale(' + scale + ')';
     b.style.transformOrigin = 'right bottom';
     b.lastChild.textContent = String(Math.floor(data.brains));
+    b.title = data.income ? '+' + data.income.toFixed(1) + '/s' : '';
     var tm = hudNodes.timer;
     tm.style.left = '50%';
     tm.style.top = (data.timerTop != null ? data.timerTop * frame.height : 90 * scale) + 'px';
@@ -705,6 +1102,8 @@
     });
     view.addEventListener('wheel', function (e) {
       e.preventDefault();
+      var p = norm(e);
+      if (p) call('viewPointer', 'wheel', p.x, p.y, 0, e.deltaY);
     }, { passive: false });
     return view;
   };
@@ -739,6 +1138,10 @@
     } catch (e) {}
     view.remove();
     view = null;
+  };
+
+  UI.viewVisible = function () {
+    return !!view;
   };
 
   UI.viewVideo = function () {

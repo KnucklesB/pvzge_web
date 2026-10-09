@@ -35,21 +35,36 @@ Install Git LFS before cloning this repository. After pulling updates, run `git 
 
 ## Multiplayer
 
-Click **Multiplayer** on the main menu to play with a friend over the internet. One player creates a room and shares the 5-letter code (or the invite link); the other joins with it.
+Click **Multiplayer** on the main menu to play with a friend over the internet. Create a room and share the 5-letter code or invite link, or join one from the public room list.
 
 | Mode | How it plays |
 | --- | --- |
-| **Co-op** | The host plays any level of the game (campaign, endless zones, minigames). Both players share the sun, seed packets and plant food, and each has their own cursor. |
-| **Versus** | One player defends with plants, the other spends brains on zombie packets and picks the lanes to attack. Plants win if they hold until the timer runs out; zombies win by reaching the house. Five arenas, each with its own zombie deck. |
-| **Survival** | Both players defend together against generated, ever-growing waves (15, 30 or 60) on the chosen arena. |
+| **Co-op** | Shared lawn: the host plays any level of the game (campaign, endless zones, minigames). Both players share sun, seed packets and plant food, each with their own cursor, and both can pick seeds. |
+| **Versus** | Shared lawn: the plant player picks plants in the game's seed chooser; the zombie player builds a 6-zombie deck in the lobby and spends brains to send zombies down any lane. Plants win by holding until the timer runs out; zombies win by reaching the house. |
+| **Survival** | One lawn per player: both run the same generated level with ever-growing waves on their own screen and watch each other's lawn live (picture-in-picture, can be enlarged). Whoever lasts more waves wins. |
 
-The multiplayer screens follow the game's language (English by default, or Chinese) and can be switched to English, Português or 中文 from the lobby.
+Match options (host): arena, side, duration, waves, difficulty, available plants (all, classic or own collection), seed slots, starting sun, sky sun rate, plant recharge, lawn mowers, starting brains, brain income, zombie recharge, stream quality and room visibility.
 
-Guest controls: click seed packets (or `1`-`4`, `Q`-`R`), `D` shovel, `F` plant food, right click cancels. As zombies: click a packet (or `1`-`6`) and then a lane. `Enter` opens the chat.
+After a match both players stay in the room: rematch, change settings or leave. Either player can end a match early from the side panel. `Enter` opens the chat. The screens are available in English, Português and 中文.
 
-How it works: the host runs the real game and streams it to the guest over WebRTC (video + game audio); the guest's inputs are sent back over a data channel and executed through the game's own planting/shovel/plant-food code paths, so every plant, zombie and level behaves exactly as in single player. The code lives in [`docs/multiplayer`](docs/multiplayer) and does not modify the game bundle.
+### Accounts, cloud saves, rooms and history
 
-Players find each other through a [PeerJS](https://peerjs.com/) signaling server. The public PeerJS cloud is used by default, so it works on static hosting such as GitHub Pages. To use your own server, run `docker compose up -d` (game + signaling server on http://localhost:8080), or start [`server`](server) anywhere and point the game at it with `?mp_server=wss://your.host:443/` or in [`docs/multiplayer/mp-config.js`](docs/multiplayer/mp-config.js). Players behind very strict NATs may need a TURN server, which can be added to `iceServers` in the same file.
+The game itself keeps its progress in the browser (`localStorage`, per profile name). With a multiplayer server (see below) players can sign up and log in from the lobby's **Account** tab:
+
+- every game profile in the browser is uploaded to the account and kept in sync automatically; logging in on another browser downloads it (if both changed, the player chooses which to keep);
+- public rooms are listed in the **Rooms** tab, finished Versus/Survival matches in the **Matches** tab, and accounts get win/best-wave stats.
+
+### How it works
+
+Shared-lawn modes are host-authoritative: the host runs the real game and streams it to the guest over WebRTC (video + game audio); the guest's inputs travel back over a data channel and run through the game's own planting/shovel/plant-food/seed-chooser code paths, so everything behaves exactly as in single player. In Survival both players stream their own lawn to each other. The code lives in [`docs/multiplayer`](docs/multiplayer) and does not modify the game bundle.
+
+### Server
+
+Without configuration the game uses the public PeerJS cloud for signaling, so playing with a room code works on static hosting such as GitHub Pages; accounts, cloud saves, the room list and history need the multiplayer server in [`server`](server) (Node.js; PeerJS signaling + REST API, data stored in `DATA_DIR`).
+
+- `docker compose up -d` runs the game and the server together on http://localhost:8080.
+- Or run `server/` anywhere (`npm install && npm start`) and point the game at it with `server` in [`docs/multiplayer/mp-config.js`](docs/multiplayer/mp-config.js) or `?mp_server=https://your.host`. Set `ALLOWED_ORIGINS` to the site that serves the game.
+- Players behind very strict NATs may need a TURN server, which can be added to `iceServers` in the same config file.
 
 ## Using Docker
 

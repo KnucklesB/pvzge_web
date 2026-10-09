@@ -1,10 +1,13 @@
 /*
  * PvZ2 Gardendless - Multiplayer application controller.
  *
- * Glues the network session, the lobby, the match controller and the
- * overlays together. The host runs the real game and streams it; the guest
- * watches the stream, sends its inputs and draws its local feedback (selected
- * packet ghost, hovered tile...) on top of the video.
+ * Glues the network session, the lobby (with the online tabs: public rooms,
+ * match history and account), the match controllers and the overlays.
+ *
+ *  - Co-op / Versus share one lawn: the host runs the real game and streams
+ *    it; the guest watches the stream, sends inputs and draws local feedback.
+ *  - Survival gives each player their own lawn: both run the level locally
+ *    and stream it to the other, shown as a picture-in-picture.
  */
 (function () {
   'use strict';
@@ -12,41 +15,72 @@
   var MP = window.PvZMP;
   var G = MP.game;
   var UI = MP.ui;
+  var api = MP.api;
   var t = MP.t;
 
   var HUD_INTERVAL = 100;
   var LAYOUT_INTERVAL = 400;
   var POINTER_INTERVAL = 33;
+  var PUBLISH_INTERVAL = 15000;
+  var ROOMS_REFRESH = 6000;
 
   var App = (MP.app = {
     session: null,
     role: null,
     phase: 'idle', // idle | lobby | match
-    settings: Object.assign({}, MP.DEFAULT_SETTINGS, MP.store.get('settings', {})),
+    settings: MP.normalizeSettings(MP.store.get('settings', {})),
     guestReady: false,
     lobbyError: null,
     match: null,
+    // lobby tabs
+    tab: 'play',
+    rooms: { list: [], loading: false, error: null, at: 0 },
+    history: { list: [], loading: false, error: null, mine: false },
+    account: { mode: 'login', error: null, busy: false, notice: null },
     // guest side
     hud: null,
     layout: null,
     localPtr: null,
     ghost: null,
+    guestRun: null,
     // host side
     remotePtr: null,
-    localHostPtr: null,
+    roomKey: null,
     pendingJoinCode: null,
   });
 
   /* ================================================================ lobby */
 
   function playerName() {
+    var u = api.user();
+    if (u) return u.username;
     return MP.store.get('name', '') || G.localPlayerName() || 'Player';
   }
+
+  // Which side the local player controls in Versus.
+  App.mySide = function () {
+    if (this.settings.mode !== 'versus') return 'plants';
+    var hs = this.settings.hostSide;
+    return this.role === 'host' ? hs : hs === 'plants' ? 'zombies' : 'plants';
+  };
 
   App.lobbyState = function () {
     var s = this.session;
     if (!s) {
-      return { view: 'home', name: playerName(), code: this.pendingJoinCode || MP.store.get('lastCode', ''), error: this.lobbyError };
+      return {
+        view: 'home',
+        tab: this.tab,
+        name: playerName(),
+        nameLocked: !!api.user(),
+        code: this.pendingJoinCode || MP.store.get('lastCode', ''),
+        error: this.lobbyError,
+        online: api.available(),
+        user: api.user(),
+        rooms: this.rooms,
+        history: this.history,
+        account: this.account,
+        cloud: { status: MP.cloud.status, lastSync: MP.cloud.lastSync, conflict: !!MP.cloud.conflict },
+      };
     }
     if (!s.code || (this.role === 'guest' && !s.connected)) {
       return { view: 'busy', busyText: this.role === 'host' ? 'creating' : 'connecting' };
@@ -54,11 +88,11 @@
     var players = [];
     var guestConnected = s.connected;
     if (this.role === 'host') {
-      players.push({ name: s.localName, role: 'host', you: true });
-      players.push(guestConnected ? { name: s.remoteName, role: 'guest', ready: this.guestReady } : null);
+      players.push({ name: s.localName, role: 'host', you: true, account: !!api.user() });
+      players.push(guestConnected ? { name: s.remoteName, role: 'guest', ready: this.guestReady, account: !!(s.remoteInfo && s.remoteInfo.ticket) } : null);
     } else {
       players.push({ name: s.remoteName, role: 'host' });
-      players.push({ name: s.localName, role: 'guest', ready: this.guestReady, you: true });
+      players.push({ name: s.localName, role: 'guest', ready: this.guestReady, you: true, account: !!api.user() });
     }
     var status = '';
     if (this.role === 'host') status = !guestConnected ? 'need_player' : !this.guestReady ? 'guest_must_ready' : '';
@@ -71,6 +105,8 @@
       settings: this.settings,
       ready: this.guestReady,
       canStart: this.role === 'host' && guestConnected && this.guestReady,
+      canEditDeck: this.settings.mode === 'versus' && this.mySide() === 'zombies',
+      online: api.available(),
       status: status,
       error: this.lobbyError,
     };
@@ -82,15 +118,35 @@
     if (G.sceneName() !== 'mainScene' && this.phase !== 'match') return;
     this.lobbyError = null;
     UI.openLobby(this.lobbyState());
+    this.onTabShown();
   };
 
   App.refreshLobby = function () {
     if (UI.isLobbyOpen()) UI.renderLobby(this.lobbyState());
   };
 
+  App.rebuildLobby = function () {
+    if (UI.isLobbyOpen()) UI.rebuildLobby(this.lobbyState());
+  };
+
   App.broadcastLobby = function () {
     if (this.role !== 'host' || !this.session) return;
     this.session.send({ t: 'lobby', settings: this.settings, guestReady: this.guestReady, phase: this.phase });
+    this.publishRoom();
+  };
+
+  App.setTab = function (tab) {
+    this.tab = tab;
+    this.lobbyError = null;
+    this.rebuildLobby();
+    this.onTabShown();
+  };
+
+  App.onTabShown = function () {
+    if (this.session || !UI.isLobbyOpen()) return;
+    if (this.tab === 'rooms') this.loadRooms();
+    else if (this.tab === 'history') this.loadHistory();
+    else if (this.tab === 'account' && api.loggedIn()) api.refreshMe().then(this.rebuildLobby.bind(this), function () {});
   };
 
   App.create = function (name) {
@@ -98,17 +154,21 @@
       this.lobbyError = 'err_name';
       return this.refreshLobby();
     }
-    MP.store.set('name', name);
+    if (!api.user()) MP.store.set('name', name);
     this.lobbyError = null;
     this.role = 'host';
     this.phase = 'lobby';
+    this.guestReady = false;
+    this.roomKey = MP.util.randomCode(24);
     var s = (this.session = new MP.Session());
     bindSession(s);
     this.refreshLobby();
     var self = this;
     s.host(name).then(
       function () {
-        if (self.session === s) self.refreshLobby();
+        if (self.session !== s) return;
+        self.refreshLobby();
+        self.publishRoom();
       },
       function (err) {
         if (self.session !== s) return;
@@ -129,7 +189,7 @@
       this.lobbyError = 'err_code';
       return this.refreshLobby();
     }
-    MP.store.set('name', name);
+    if (!api.user()) MP.store.set('name', name);
     MP.store.set('lastCode', code);
     this.pendingJoinCode = null;
     this.lobbyError = null;
@@ -140,29 +200,41 @@
     bindSession(s);
     this.refreshLobby();
     var self = this;
-    s.join(code, name).then(
-      function (welcome) {
-        if (self.session !== s) return;
-        if (welcome.settings) self.settings = welcome.settings;
-        self.refreshLobby();
-        if (welcome.phase === 'match' && welcome.start) self.guestEnterMatch(welcome.start);
-      },
-      function (err) {
-        if (self.session !== s) return;
-        self.teardown();
-        self.lobbyError = MP.errorKey(err);
-        self.refreshLobby();
-      },
-    );
+    var user = api.user();
+    api
+      .ticket()
+      .then(function (ticket) {
+        return s.join(code, name, user ? { account: user.username, ticket: ticket } : null);
+      })
+      .then(
+        function (welcome) {
+          if (self.session !== s) return;
+          if (welcome.settings) self.settings = MP.normalizeSettings(welcome.settings);
+          if (welcome.guestReady != null) self.guestReady = !!welcome.guestReady;
+          self.refreshLobby();
+          if (welcome.phase === 'match' && welcome.start) self.guestEnterMatch(welcome.start);
+        },
+        function (err) {
+          if (self.session !== s) return;
+          self.teardown();
+          self.lobbyError = MP.errorKey(err);
+          self.refreshLobby();
+        },
+      );
   };
 
   App.leave = function () {
     var wasGuestInMatch = this.role === 'guest' && this.phase === 'match';
-    if (this.role === 'host' && this.match) this.endMatchCleanup();
+    if (this.role === 'host') {
+      if (this.match) this.endMatchCleanup();
+      this.unpublishRoom();
+    }
     if (this.session) this.session.close(true);
     this.teardown();
-    if (wasGuestInMatch) this.guestExitView();
-    this.refreshLobby();
+    if (wasGuestInMatch) this.guestExitMatch();
+    UI.closeModal();
+    if (G.sceneName() === 'mainScene') this.openLobby();
+    else if (G.sceneName() === 'inGameScene') G.goToMain();
   };
 
   App.teardown = function () {
@@ -170,6 +242,7 @@
       this.match.dispose();
       this.match = null;
     }
+    this.disposeGuestRun();
     this.session = null;
     this.role = null;
     this.phase = 'idle';
@@ -177,6 +250,8 @@
     this.hud = null;
     this.layout = null;
     this.remotePtr = null;
+    this.roomKey = null;
+    UI.hidePip();
     UI.renderBadge(null);
     UI.renderVersusHud(null);
     UI.renderStage(null);
@@ -186,9 +261,42 @@
     if (this.role !== 'host') return;
     if (key === 'quality' && this.session) this.session.applyQuality(value, G.canvas);
     this.settings[key] = value;
+    if (key === 'stage') this.settings.zdeck = MP.defaultDeck(value);
+    this.settings = MP.normalizeSettings(this.settings);
     MP.store.set('settings', this.settings);
     this.broadcastLobby();
     this.refreshLobby();
+  };
+
+  // The zombie player picks their deck in the lobby.
+  App.setDeck = function (deck) {
+    if (this.settings.mode !== 'versus' || this.mySide() !== 'zombies') return;
+    deck = MP.validDeck(this.settings.stage, deck);
+    if (this.role === 'host') {
+      this.settings.zdeck = deck;
+      MP.store.set('settings', this.settings);
+      this.broadcastLobby();
+    } else if (this.session) {
+      this.settings.zdeck = deck;
+      this.session.send({ t: 'zdeck', deck: deck });
+    }
+    this.refreshLobby();
+  };
+
+  App.toggleDeckZombie = function (type) {
+    var deck = (this.settings.zdeck || []).slice();
+    var i = deck.indexOf(type);
+    if (i >= 0) {
+      if (deck.length <= 1) return;
+      deck.splice(i, 1);
+    } else {
+      if (deck.length >= MP.DECK_SIZE) {
+        UI.toast(t('deck_full', { n: MP.DECK_SIZE }), 'warn');
+        return;
+      }
+      deck.push(type);
+    }
+    this.setDeck(deck);
   };
 
   App.ready = function (value) {
@@ -231,6 +339,147 @@
     UI.closeLobby();
   };
 
+  /* ===================================================== online features */
+
+  App.loadRooms = function () {
+    var self = this;
+    if (!api.available() || this.rooms.loading) return;
+    this.rooms.loading = true;
+    this.rooms.error = null;
+    this.refreshLobby();
+    api
+      .rooms()
+      .then(
+        function (list) {
+          self.rooms.list = list;
+          self.rooms.at = Date.now();
+        },
+        function (e) {
+          self.rooms.error = 'err_' + (e.code === 'offline' ? 'network' : 'generic');
+        },
+      )
+      .then(function () {
+        self.rooms.loading = false;
+        self.refreshLobby();
+      });
+  };
+
+  App.loadHistory = function (mine) {
+    var self = this;
+    if (!api.available()) return;
+    if (mine != null) this.history.mine = !!mine && !!api.user();
+    this.history.loading = true;
+    this.history.error = null;
+    this.refreshLobby();
+    api
+      .matches(this.history.mine && api.user() ? api.user().username : null)
+      .then(
+        function (list) {
+          self.history.list = list;
+        },
+        function (e) {
+          self.history.error = 'err_' + (e.code === 'offline' ? 'network' : 'generic');
+        },
+      )
+      .then(function () {
+        self.history.loading = false;
+        self.refreshLobby();
+      });
+  };
+
+  App.publishRoom = function () {
+    var s = this.session;
+    if (this.role !== 'host' || !s || !s.code || !api.available() || !this.roomKey) return;
+    api
+      .publishRoom(s.code, {
+        key: this.roomKey,
+        host: s.localName,
+        mode: this.settings.mode,
+        stage: this.settings.stage,
+        players: s.connected ? 2 : 1,
+        status: this.phase === 'match' ? 'playing' : 'waiting',
+        public: this.settings.public !== false,
+      })
+      .catch(function () {});
+  };
+
+  App.unpublishRoom = function () {
+    if (this.role === 'host' && this.session && this.session.code && this.roomKey && api.available()) {
+      api.unpublishRoom(this.session.code, this.roomKey);
+    }
+  };
+
+  App.accountSubmit = function (mode, username, password, password2) {
+    var self = this;
+    var acc = this.account;
+    acc.error = null;
+    acc.notice = null;
+    if (!/^[A-Za-z0-9][A-Za-z0-9_\-.]{2,19}$/.test(username)) acc.error = 'err_bad_username';
+    else if (password.length < 6) acc.error = 'err_bad_password';
+    else if (mode === 'register' && password !== password2) acc.error = 'err_password_match';
+    if (acc.error) return this.rebuildLobby();
+    acc.busy = true;
+    this.rebuildLobby();
+    (mode === 'register' ? api.register(username, password) : api.login(username, password))
+      .then(
+        function () {
+          acc.notice = mode === 'register' ? 'account_created' : null;
+          return MP.cloud.sync().catch(function () {});
+        },
+        function (e) {
+          acc.error = {
+            username_taken: 'err_username_taken',
+            bad_credentials: 'err_bad_credentials',
+            bad_username: 'err_bad_username',
+            bad_password: 'err_bad_password',
+            rate_limited: 'err_rate_limited',
+            offline: 'err_network',
+          }[e.code] || 'err_generic';
+        },
+      )
+      .then(function () {
+        acc.busy = false;
+        self.rebuildLobby();
+      });
+  };
+
+  App.accountMode = function (mode) {
+    this.account.mode = mode;
+    this.account.error = null;
+    this.rebuildLobby();
+  };
+
+  App.logout = function () {
+    var self = this;
+    api.logout().then(function () {
+      self.rebuildLobby();
+    });
+  };
+
+  App.cloudSync = function () {
+    var self = this;
+    MP.cloud
+      .sync()
+      .then(
+        function (r) {
+          if (r === 'uploaded' || r === 'in-sync') UI.toast(t('cloud_synced'), 'good');
+        },
+        function () {
+          UI.toast(t('cloud_error'), 'warn');
+        },
+      )
+      .then(function () {
+        self.rebuildLobby();
+      });
+  };
+
+  App.cloudDownload = function () {
+    if (!window.confirm(t('cloud_download_confirm'))) return;
+    MP.cloud.download().catch(function () {
+      UI.toast(t('cloud_error'), 'warn');
+    });
+  };
+
   /* ============================================================ session */
 
   function bindSession(s) {
@@ -248,6 +497,7 @@
       }
       App.refreshLobby();
       App.updateBadge();
+      App.publishRoom();
     });
     s.on('peer-left', function (p) {
       if (App.session !== s) return;
@@ -256,11 +506,13 @@
         App.guestReady = false;
         App.remotePtr = null;
         G.setRemotePointer(null);
-        s.stopStream();
+        G.hooks.remoteChooser = false;
+        UI.hidePip();
         // Versus can't go on alone: the remaining player wins by forfeit.
         if (App.match) App.match.forfeit();
         App.refreshLobby();
         App.updateBadge();
+        App.publishRoom();
       } else {
         var inMatch = App.phase === 'match';
         App.session = null;
@@ -268,20 +520,23 @@
           s.close(true);
         } catch (e) {}
         App.teardown();
-        if (inMatch) App.guestExitView();
+        if (inMatch) App.guestExitMatch();
         App.lobbyError = p.reason === 'bye' || p.reason === 'kicked' ? 'err_closed' : 'err_lost';
         UI.closeModal();
-        UI.openLobby(App.lobbyState());
+        if (G.sceneName() === 'mainScene') UI.openLobby(App.lobbyState());
+        else G.goToMain();
       }
     });
     s.on('rtt', function () {
       App.updateBadge();
     });
     s.on('stream', function (stream) {
-      if (App.role === 'guest') UI.setViewStream(stream);
+      if (App.settings.mode === 'survival') UI.showPip(stream);
+      else if (App.role === 'guest') UI.setViewStream(stream);
     });
     s.on('stream-ended', function () {
-      if (App.role === 'guest' && App.phase === 'match') UI.setViewWaiting();
+      if (App.settings.mode === 'survival') UI.hidePip();
+      else if (App.role === 'guest' && App.phase === 'match') UI.setViewWaiting();
     });
     s.on('message', function (msg) {
       if (App.session !== s) return;
@@ -305,32 +560,45 @@
   App.startMatch = function () {
     UI.closeModal();
     UI.closeLobby();
+    UI.hidePip();
     if (this.match) this.match.dispose();
     this.phase = 'match';
+    this._toldChooser = false;
     this.match = new MP.Match(this, this.settings);
     this.session.send(Object.assign({ t: 'start' }, this.startPayload()));
-    this.startStream();
+    this.startStream(true);
     this.match.start();
     this.updateBadge();
-    if (this.settings.mode === 'coop') setTimeout(function () {
-      UI.toast(t('coop_hint'), 'good', 4500);
-    }, 1200);
+    this.publishRoom();
+    if (this.settings.mode === 'coop') {
+      setTimeout(function () {
+        UI.toast(t('coop_hint'), 'good', 4500);
+      }, 1200);
+    }
   };
 
-  App.startStream = function () {
+  App.startStream = function (restart) {
     var s = this.session;
     if (!s || !s.connected) return;
-    if (!s.call) s.startStream(G.canvas, this.settings.quality);
+    if (restart || !s.call) s.startStream(G.canvas, this.settings.quality);
   };
 
   App.onHostMessage = function (msg) {
     var m = this.match;
+    var norm, ui;
     switch (msg.t) {
       case 'ready':
         this.guestReady = !!msg.v;
         if (this.guestReady) UI.toast(t('player_ready', { name: this.session.remoteName }), 'good');
         this.broadcastLobby();
         this.refreshLobby();
+        break;
+      case 'zdeck':
+        if (this.settings.mode === 'versus' && this.settings.hostSide === 'plants' && this.phase === 'lobby') {
+          this.settings.zdeck = MP.validDeck(this.settings.stage, msg.deck);
+          this.broadcastLobby();
+          this.refreshLobby();
+        }
         break;
       case 'ptr':
         if (msg.x < 0) {
@@ -339,21 +607,37 @@
           break;
         }
         this.remotePtr = { x: msg.x, y: msg.y };
-        if (m && G.ready) m.remotePointer(G.normToUI(msg.x, msg.y));
+        if (m && G.ready) m.remotePointer(G.normToUI(msg.x, msg.y), this.remotePtr);
         break;
       case 'down':
-        this.remotePtr = { x: msg.x, y: msg.y };
+        norm = { x: msg.x, y: msg.y };
+        this.remotePtr = norm;
         if (m && G.ready) {
-          var ui = G.normToUI(msg.x, msg.y);
-          m.remotePointer(ui);
-          m.remoteDown(ui, msg.b);
+          ui = G.normToUI(msg.x, msg.y);
+          m.remotePointer(ui, norm);
+          m.remoteDown(ui, msg.b, norm);
           this.sendHud(true);
         }
+        break;
+      case 'wheel':
+        if (m && m.guestPicksSeeds()) G.injectPointer('wheel', msg.x, msg.y, 0, msg.dy);
         break;
       case 'key':
         if (m) {
           m.remoteKey(String(msg.k || '').toLowerCase());
           this.sendHud(true);
+        }
+        break;
+      case 'sv':
+        if (m && m.mode === 'survival') m.partnerUpdate(msg.state);
+        this.updatePipLabel();
+        this.updateBadge();
+        break;
+      case 'end-request':
+      case 'to-room':
+        if (this.phase === 'match') {
+          UI.toast(t(msg.t === 'to-room' ? 'guest_back_to_room' : 'guest_ended', { name: this.session.remoteName }), 'warn');
+          this.returnToLobby();
         }
         break;
       case 'chat':
@@ -368,7 +652,7 @@
     if (!force && now - (this._hudAt || 0) < HUD_INTERVAL) return;
     this._hudAt = now;
     this.session.send(Object.assign({ t: 'hud' }, this.match.hud()));
-    if (force || now - (this._layoutAt || 0) >= LAYOUT_INTERVAL) {
+    if (this.match.mode !== 'survival' && (force || now - (this._layoutAt || 0) >= LAYOUT_INTERVAL)) {
       this._layoutAt = now;
       this.session.send({ t: 'layout', layout: this.hostLayout() });
     }
@@ -382,8 +666,22 @@
   App.onMatchFinished = function (result) {
     if (this.role !== 'host' || !this.match) return;
     this.lastResult = result;
-    if (this.session) this.session.send({ t: 'end', result: result, names: this.names() });
+    var names = this.names();
+    if (this.session) this.session.send({ t: 'end', result: result, names: names });
     this.showResults(result, 'host');
+    this.recordMatch(result, names);
+  };
+
+  App.recordMatch = function (result, names) {
+    var s = this.session;
+    if (!api.available() || !s || !this.roomKey) return;
+    var rec = MP.matchRecord(result, names);
+    rec.room = s.code;
+    rec.key = this.roomKey;
+    rec.stage = result.stage;
+    rec.players[0].self = !!api.user();
+    if (s.remoteInfo && s.remoteInfo.ticket) rec.players[1].ticket = s.remoteInfo.ticket;
+    api.postMatch(rec);
   };
 
   App.names = function () {
@@ -397,7 +695,7 @@
     var self = this;
     if (role === 'host') {
       d.actions = [
-        { label: t('to_lobby'), cls: 'mp-red', fn: function () {
+        { label: t('back_to_room'), cls: 'mp-brown', fn: function () {
           self.returnToLobby();
         } },
         { label: t('rematch'), cls: 'mp-green', fn: function () {
@@ -406,11 +704,17 @@
         } },
       ];
     } else {
-      d.actions = [{ label: t('leave'), cls: 'mp-red', fn: function () {
-        self.leave();
-      } }];
-      d.waitText = t('waiting_host');
+      d.actions = [
+        { label: t('leave_room'), cls: 'mp-red', fn: function () {
+          self.leave();
+        } },
+        { label: t('back_to_room'), cls: 'mp-brown', fn: function () {
+          if (self.session) self.session.send({ t: 'to-room' });
+        } },
+      ];
+      d.waitText = t('waiting_host_rematch');
     }
+    UI.hidePipExpanded();
     G.play(d.win ? 'playPlantNodeUnlock' : 'playLevelTaskWarn');
     UI.showResults(d);
   };
@@ -419,12 +723,20 @@
     if (this.role === 'host' && this.match) this.returnToLobby();
   };
 
+  App.onLocalRunDone = function (state) {
+    var other = this.role === 'host' ? this.session && this.session.remoteName : this.session && this.session.remoteName;
+    UI.toast(t(state.result === 'won' ? 'you_survived' : 'you_fell', { n: state.wave, name: other }), state.result === 'won' ? 'good' : 'warn', 5000);
+    UI.expandPip(true);
+  };
+
   App.endMatchCleanup = function () {
     if (this.match) {
       this.match.dispose();
       this.match = null;
     }
     if (this.session) this.session.stopStream();
+    G.hooks.remoteChooser = false;
+    UI.hidePip();
     UI.renderVersusHud(null);
     UI.renderStage(null);
   };
@@ -433,18 +745,18 @@
     if (this.role !== 'host') return;
     this.endMatchCleanup();
     this.phase = 'lobby';
-    this.guestReady = false;
     if (this.session) this.session.send({ t: 'lobby-return' });
     this.broadcastLobby();
     UI.closeModal();
-    var self = this;
-    var go = G.sceneName() === 'mainScene' ? Promise.resolve() : G.goToMain();
-    Promise.resolve(go).then(function () {
-      setTimeout(function () {
-        if (self.session) self.openLobby();
-      }, 300);
-    });
+    if (G.sceneName() === 'mainScene') this.openLobby();
+    else G.goToMain(); // the lobby reopens when the main menu loads
     this.updateBadge();
+  };
+
+  App.endMatch = function () {
+    if (!window.confirm(t('end_match_confirm'))) return;
+    if (this.role === 'host') this.returnToLobby();
+    else if (this.session) this.session.send({ t: 'end-request' });
   };
 
   /* ======================================================== guest side */
@@ -452,7 +764,7 @@
   App.onGuestMessage = function (msg) {
     switch (msg.t) {
       case 'lobby':
-        if (msg.settings) this.settings = msg.settings;
+        if (msg.settings) this.settings = MP.normalizeSettings(msg.settings);
         if (msg.guestReady != null) this.guestReady = msg.guestReady;
         this.refreshLobby();
         break;
@@ -461,8 +773,13 @@
         break;
       case 'hud':
         this.hud = msg;
+        if (msg.chooser && !this._toldChooser && this.seat === 'plants') {
+          this._toldChooser = true;
+          UI.toast(t('guest_pick_seeds'), 'good', 5000);
+        }
         this.updateGhost();
         this.updateBadge();
+        this.updatePipLabel();
         break;
       case 'layout':
         this.layout = msg.layout;
@@ -471,11 +788,11 @@
         this.showResults(msg.result, 'guest', msg.names);
         break;
       case 'lobby-return':
-        this.guestExitView();
+        this.guestExitMatch();
         this.phase = 'lobby';
-        this.guestReady = false;
         UI.closeModal();
-        this.openLobby();
+        if (G.sceneName() === 'mainScene') this.openLobby();
+        else G.goToMain();
         break;
       case 'chat':
         UI.chatLine(this.session.remoteName, String(msg.text || '').slice(0, 120), 'var(--mp-p1)');
@@ -487,37 +804,77 @@
   };
 
   App.guestEnterMatch = function (msg) {
-    if (msg.settings) this.settings = msg.settings;
+    if (msg.settings) this.settings = MP.normalizeSettings(msg.settings);
     this.seat = msg.seat || 'plants';
     this.phase = 'match';
     this.hud = null;
     this.layout = null;
     this.ghost = null;
+    this._toldChooser = false;
     UI.closeModal();
     UI.closeLobby();
-    UI.showView();
-    MP.audio.setLocalMuted(true);
-    try {
-      if (G.cc && !G.cc.game.isPaused()) G.cc.game.pause();
-    } catch (e) {}
+    if (this.settings.mode === 'survival') {
+      // Own lawn: run the level here and stream it to the host.
+      UI.hideView();
+      UI.hidePip();
+      this.resumeLocalGame();
+      this.disposeGuestRun();
+      var self = this;
+      this.guestRun = new MP.SoloRun(this.settings, function (state) {
+        self.sendRunState(state, true);
+        if (state.phase === 'done') {
+          var hostRun = self.hud && self.hud.run;
+          if (!hostRun || hostRun.phase !== 'done') self.onLocalRunDone(state);
+        }
+      });
+      this.guestRun.start();
+      if (this.session) this.session.startStream(G.canvas, this.settings.quality);
+    } else {
+      UI.showView();
+      MP.audio.setLocalMuted(true);
+      try {
+        if (G.cc && !G.cc.game.isPaused()) G.cc.game.pause();
+      } catch (e) {}
+    }
     this.updateBadge();
   };
 
-  App.guestExitView = function () {
-    UI.hideView();
-    UI.renderVersusHud(null);
-    UI.renderStage(null);
+  App.sendRunState = function (state, force) {
+    var now = performance.now();
+    if (!this.session || (!force && now - (this._svAt || 0) < 1000)) return;
+    this._svAt = now;
+    this.session.send({ t: 'sv', state: state });
+  };
+
+  App.disposeGuestRun = function () {
+    if (this.guestRun) {
+      this.guestRun.dispose();
+      this.guestRun = null;
+    }
+  };
+
+  App.resumeLocalGame = function () {
     MP.audio.setLocalMuted(false);
     try {
       if (G.cc && G.cc.game.isPaused()) G.cc.game.resume();
     } catch (e) {}
+  };
+
+  App.guestExitMatch = function () {
+    UI.hideView();
+    UI.hidePip();
+    UI.renderVersusHud(null);
+    UI.renderStage(null);
+    this.disposeGuestRun();
+    if (this.session) this.session.stopStream();
+    this.resumeLocalGame();
     this.hud = null;
     this.layout = null;
     this.ghost = null;
     this.updateBadge();
   };
 
-  App.viewPointer = function (type, x, y, button) {
+  App.viewPointer = function (type, x, y, button, dy) {
     if (this.role !== 'guest' || !this.session) return;
     if (type === 'leave') {
       this.localPtr = null;
@@ -528,6 +885,8 @@
     if (x < 0 || x > 1 || y < 0 || y > 1) return;
     if (type === 'down') {
       this.session.send({ t: 'down', x: x, y: y, b: button });
+    } else if (type === 'wheel') {
+      this.session.send({ t: 'wheel', x: x, y: y, dy: dy });
     } else {
       var now = performance.now();
       if (now - (this._ptrAt || 0) < POINTER_INTERVAL) return;
@@ -570,13 +929,13 @@
   var HELD = { card: '🌱', shovel: '⛏', food: '⚡', zcard: '🧠' };
 
   App.frameRect = function () {
-    if (this.role === 'guest') return UI.viewContentRect();
+    if (this.role === 'guest' && this.settings.mode !== 'survival') return UI.viewContentRect();
     var r = G.canvas && G.canvas.getBoundingClientRect();
     return r ? { left: r.left, top: r.top, width: r.width, height: r.height } : null;
   };
 
   App.renderOverlays = function () {
-    if (!this.session || this.phase !== 'match') {
+    if (!this.session || this.phase !== 'match' || this.settings.mode === 'survival') {
       UI.renderStage(null);
       UI.renderVersusHud(null);
       return;
@@ -635,10 +994,11 @@
       var mySide = this.role === 'host' ? this.settings.hostSide : hud.seat;
       UI.renderVersusHud(frame, {
         brains: hud.brains || 0,
+        income: hud.income || 0,
         timeLeft: hud.timeLeft || 0,
         barTop: barTop,
         timerTop: timerTop,
-        goal: hud.phase === 'playing' ? (mySide === 'zombies' ? t('pick_zombie') : '') : '',
+        goal: mySide === 'zombies' ? t('pick_zombie') : '',
       });
     } else {
       UI.renderVersusHud(null);
@@ -654,6 +1014,21 @@
     return this._layoutCache.value;
   };
 
+  function runLine(run, total) {
+    if (!run) return '';
+    if (run.phase === 'done') return run.result === 'won' ? t('survived') : t('fell_at', { n: run.wave });
+    if (run.phase === 'loading') return t('picking_seeds');
+    return t('wave_of', { n: Math.max(1, run.wave), total: total });
+  }
+
+  // Survival: partner's lawn label in the picture-in-picture.
+  App.updatePipLabel = function () {
+    if (this.settings.mode !== 'survival' || !this.session) return;
+    var total = Number(this.settings.waves) || 0;
+    var run = this.role === 'host' ? this.match && this.match.partner : this.hud && this.hud.run;
+    UI.setPipLabel(this.session.remoteName, runLine(run, total));
+  };
+
   App.updateBadge = function () {
     var s = this.session;
     if (!s || this.phase !== 'match') {
@@ -666,18 +1041,18 @@
       { name: names[0], color: 'var(--mp-p1)', ping: this.role === 'guest' ? s.rtt : null },
       { name: names[1] + (s.connected ? '' : ' …'), color: 'var(--mp-p2)', ping: this.role === 'host' && s.connected ? s.rtt : null },
     ];
-    var hud = this.role === 'host' ? this.match && this.match.hud() : this.hud;
     var line = '';
-    if (hud && hud.mode === 'survival' && hud.wave > 0) line = t('wave_of', { n: hud.wave, total: hud.waveTotal });
-    var action =
-      this.role === 'host'
-        ? { label: t('end_session'), fn: function () {
-            self.returnToLobby();
-          } }
-        : { label: t('leave'), fn: function () {
-            if (window.confirm(t('quit_confirm'))) self.leave();
-          } };
-    UI.renderBadge({ mode: this.settings.mode, players: players, line: line, action: action });
+    if (this.settings.mode === 'survival') {
+      var total = Number(this.settings.waves) || 0;
+      var mine = this.role === 'host' ? this.match && this.match.run && this.match.run.state() : this.guestRun && this.guestRun.state();
+      var other = this.role === 'host' ? this.match && this.match.partner : this.hud && this.hud.run;
+      players[0].info = runLine(this.role === 'host' ? mine : other, total);
+      players[1].info = runLine(this.role === 'host' ? other : mine, total);
+    }
+    var actions = [{ label: t('end_match'), cls: 'mp-red', fn: function () {
+      self.endMatch();
+    } }];
+    UI.renderBadge({ mode: this.settings.mode, players: players, line: line, actions: actions });
   };
 
   /* ========================================================= main menu */
@@ -763,7 +1138,7 @@
 
   function onLang() {
     if (App.menuLabel && App.menuLabel.isValid) App.menuLabel.string = t('multiplayer');
-    if (UI.isLobbyOpen()) UI.rebuildLobby(App.lobbyState());
+    App.rebuildLobby();
     UI.renderBadge(null);
     App.updateBadge();
   }
@@ -782,10 +1157,16 @@
         setTimeout(function () {
           App.openLobby();
         }, 600);
-      } else if (App.session && App.role === 'host' && App.phase === 'lobby' && !UI.isLobbyOpen()) {
+      } else if (App.session && App.phase === 'lobby' && !UI.isLobbyOpen()) {
         setTimeout(function () {
           App.openLobby();
         }, 300);
+      }
+      // Guest left their own Survival lawn from the pause menu.
+      if (App.guestRun && App.guestRun.phase !== 'done' && App.phase === 'match') {
+        App.guestRun.phase = 'done';
+        App.guestRun.result = 'lost';
+        App.sendRunState(App.guestRun.state(), true);
       }
     }
     if (App.role === 'host' && App.match) App.sendHud(true);
@@ -794,7 +1175,15 @@
   function onFrame(dt) {
     if (App.role === 'host' && App.match) {
       App.match.frame(dt);
+      G.hooks.remoteChooser = App.match.guestOwnsChooser();
+      if (G.hooks.remoteChooser && !App._toldChooser) {
+        App._toldChooser = true;
+        UI.toast(t('host_guest_picks_seeds', { name: App.session.remoteName }), 'good', 5000);
+      }
       App.sendHud(false);
+    } else if (App.guestRun) {
+      App.guestRun.frame(dt);
+      App.sendRunState(App.guestRun.state(), false);
     }
   }
 
@@ -833,10 +1222,10 @@
       return;
     }
     var k = keyName(e);
-    if (App.role === 'guest') {
+    if (App.role === 'guest' && UI.viewVisible()) {
       if (k) App.session.send({ t: 'key', k: k });
       e.stopImmediatePropagation();
-    } else if (App.match && k && App.match.localKey(k)) {
+    } else if (App.role === 'host' && App.match && k && App.match.localKey(k)) {
       e.stopImmediatePropagation();
     }
   }
@@ -865,6 +1254,9 @@
       setting: function (k, v) {
         App.setting(k, v);
       },
+      toggleDeck: function (type) {
+        App.toggleDeckZombie(type);
+      },
       ready: function (v) {
         App.ready(v);
       },
@@ -874,8 +1266,8 @@
       copy: function (what, btn) {
         App.copy(what, btn);
       },
-      viewPointer: function (type, x, y, b) {
-        App.viewPointer(type, x, y, b);
+      viewPointer: function (type, x, y, b, dy) {
+        App.viewPointer(type, x, y, b, dy);
       },
       chat: function (text) {
         App.chat(text);
@@ -883,8 +1275,56 @@
       lang: function (code) {
         App.setLang(code);
       },
+      tab: function (tab) {
+        App.setTab(tab);
+      },
+      refreshRooms: function () {
+        App.loadRooms();
+      },
+      joinRoom: function (code) {
+        App.join(code, playerName());
+      },
+      refreshHistory: function (mine) {
+        App.loadHistory(mine);
+      },
+      accountMode: function (mode) {
+        App.accountMode(mode);
+      },
+      accountSubmit: function (mode, u, p, p2) {
+        App.accountSubmit(mode, u, p, p2);
+      },
+      logout: function () {
+        App.logout();
+      },
+      cloudSync: function () {
+        App.cloudSync();
+      },
+      cloudDownload: function () {
+        App.cloudDownload();
+      },
+      cloudKeepCloud: function () {
+        UI.closeCloudConflict();
+        MP.cloud.keepCloud().catch(function () {
+          UI.toast(t('cloud_error'), 'warn');
+        });
+      },
+      cloudKeepLocal: function () {
+        UI.closeCloudConflict();
+        MP.cloud
+          .keepLocal()
+          .then(function () {
+            UI.toast(t('cloud_synced'), 'good');
+            App.rebuildLobby();
+          })
+          .catch(function () {
+            UI.toast(t('cloud_error'), 'warn');
+          });
+      },
     });
     MP.bus.on('lang', onLang);
+    api.on('auth', function () {
+      App.rebuildLobby();
+    });
     var join = MP.params.get('mp_join');
     if (join) App.pendingJoinCode = join.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
 
@@ -896,8 +1336,17 @@
     });
     window.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('beforeunload', function () {
+      App.unpublishRoom();
       if (App.session) App.session.close(true);
     });
+
+    // Keep the public room listing alive and the room browser fresh.
+    setInterval(function () {
+      App.publishRoom();
+    }, PUBLISH_INTERVAL);
+    setInterval(function () {
+      if (!App.session && App.tab === 'rooms' && UI.isLobbyOpen()) App.loadRooms();
+    }, ROOMS_REFRESH);
 
     G.init().then(function () {
       G.canvas.addEventListener('pointerdown', function (e) {
@@ -908,6 +1357,16 @@
       }, true);
       G.on('scene', onScene);
       G.on('frame', onFrame);
+      MP.cloud.on('conflict', function (c) {
+        UI.showCloudConflict(c);
+      });
+      MP.cloud.on('reloading', function () {
+        UI.toast(t('cloud_reloading'), 'good', 5000);
+      });
+      MP.cloud.on('status', function () {
+        if (App.tab === 'account') App.rebuildLobby();
+      });
+      MP.cloud.init();
       requestAnimationFrame(loop);
     });
   };

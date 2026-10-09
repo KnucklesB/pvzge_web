@@ -93,7 +93,8 @@
     this.role = null; // 'host' | 'guest'
     this.peer = null;
     this.conn = null;
-    this.call = null;
+    this.call = null; // outgoing media (our canvas)
+    this.inCall = null; // incoming media (the other player's canvas)
     this.code = null;
     this.localName = '';
     this.remoteName = '';
@@ -182,7 +183,12 @@
             self._onIncoming(conn);
           });
           peer.on('call', function (call) {
-            call.close();
+            // Only the connected guest may stream to us (Survival).
+            if (!self.conn || call.peer !== self.conn.peer) {
+              call.close();
+              return;
+            }
+            self._onCall(call);
           });
           return code;
         },
@@ -231,6 +237,7 @@
         return;
       }
       self.remoteName = String(msg.name || 'Player').slice(0, 20);
+      self.remoteInfo = { account: msg.account ? String(msg.account).slice(0, 20) : null, ticket: msg.ticket ? String(msg.ticket).slice(0, 400) : null };
       self._attach(conn);
       self.emit('peer-joined', { name: self.remoteName });
     });
@@ -238,7 +245,8 @@
 
   /* ------------------------------------------------------------------- guest */
 
-  Session.prototype.join = function (code, name) {
+  // `hello` carries optional extra handshake data (account name + ticket).
+  Session.prototype.join = function (code, name, hello) {
     var self = this;
     this.role = 'guest';
     this.localName = name;
@@ -272,7 +280,7 @@
         }
         self.on('error', fail);
         conn.on('open', function () {
-          conn.send({ t: 'hello', v: MP.PROTOCOL, name: name, mp: MP.VERSION });
+          conn.send(Object.assign({}, hello || {}, { t: 'hello', v: MP.PROTOCOL, name: name, mp: MP.VERSION }));
         });
         conn.on('data', function onData(msg) {
           if (settled || !msg) return;
@@ -297,18 +305,18 @@
 
   Session.prototype._onCall = function (call) {
     var self = this;
-    if (this.call) {
+    if (this.inCall) {
       try {
-        this.call.close();
+        this.inCall.close();
       } catch (e) {}
     }
-    this.call = call;
+    this.inCall = call;
     call.on('stream', function (stream) {
       self.emit('stream', stream);
     });
     call.on('close', function () {
-      if (self.call === call) {
-        self.call = null;
+      if (self.inCall === call) {
+        self.inCall = null;
         self.emit('stream-ended');
       }
     });
@@ -386,11 +394,12 @@
     try {
       conn.close();
     } catch (e) {}
-    if (this.call) {
+    this.stopStream();
+    if (this.inCall) {
       try {
-        this.call.close();
+        this.inCall.close();
       } catch (e) {}
-      this.call = null;
+      this.inCall = null;
     }
     var name = this.remoteName;
     this.emit('peer-left', { name: name, reason: reason });
@@ -420,7 +429,7 @@
   /* ------------------------------------------------------------------ stream */
 
   Session.prototype.startStream = function (canvas, quality) {
-    if (this.role !== 'host' || !this.conn) return false;
+    if (!this.conn) return false;
     this.quality = QUALITY[quality] ? quality : this.quality;
     var q = QUALITY[this.quality];
     if (!canvas.captureStream) {
@@ -512,6 +521,12 @@
     this.connected = false;
     clearInterval(this._hb);
     this.stopStream();
+    if (this.inCall) {
+      try {
+        this.inCall.close();
+      } catch (e) {}
+      this.inCall = null;
+    }
     var peer = this.peer;
     this.peer = null;
     setTimeout(function () {

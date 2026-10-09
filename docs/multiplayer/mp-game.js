@@ -33,6 +33,7 @@
     'SoundRescourses',
     'CharacterManager',
     'MultiLanguage',
+    'PlayerProperties',
   ];
 
   var G = (MP.game = new MP.Emitter());
@@ -427,10 +428,25 @@
     managedZombieBar: false,
     // When set, the 1.5x speed toggle is disabled (Versus is timed).
     lockSpeed: false,
+    // When set, the host's real mouse can't touch the canvas (the guest is
+    // using the native seed chooser through injected events).
+    remoteChooser: false,
   };
 
   function installHooks() {
     var cc = G.cc;
+
+    // 0. Let the guest drive the native seed chooser: their clicks are replayed
+    //    as synthetic DOM events, and the host's real mouse is held back.
+    ['mousedown', 'mouseup', 'mousemove', 'wheel'].forEach(function (type) {
+      window.addEventListener(
+        type,
+        function (e) {
+          if (G.hooks.remoteChooser && e.isTrusted && e.target === G.canvas) e.stopImmediatePropagation();
+        },
+        true,
+      );
+    });
 
     // 1. Sun / coins / drops are collected by hovering them, as in the game.
     var Dropping = G.m.dropping.dropping;
@@ -500,6 +516,42 @@
       };
     }
   }
+
+  /* ------------------------------------------------------- seed chooser */
+
+  G.seedChooserOpen = function () {
+    var lp = G.lp();
+    try {
+      return !!(lp && lp.isSeedChooserMode && lp.isSeedChooserMode());
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // Replays a pointer action at a normalized canvas position as real DOM
+  // events, exactly where the engine listens for them.
+  G.injectPointer = function (type, nx, ny, button, deltaY) {
+    var c = G.canvas;
+    if (!c) return;
+    var r = c.getBoundingClientRect();
+    var init = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX: r.left + nx * r.width,
+      clientY: r.top + ny * r.height,
+      button: button || 0,
+      buttons: type === 'down' ? 1 : 0,
+    };
+    if (type === 'wheel') {
+      init.deltaY = deltaY || 0;
+      c.dispatchEvent(new WheelEvent('wheel', init));
+      return;
+    }
+    var name = type === 'down' ? 'mousedown' : type === 'up' ? 'mouseup' : 'mousemove';
+    if (type !== 'move') c.dispatchEvent(new MouseEvent('mousemove', init));
+    c.dispatchEvent(new MouseEvent(name, init));
+  };
 
   /* ---------------------------------------------------------- zombie side */
 

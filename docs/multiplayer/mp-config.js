@@ -4,16 +4,17 @@
  * Self-hosters can override any of these values by defining
  * `window.PVZ_MP_CONFIG` before this file is loaded, or by editing this file.
  *
- * Signaling:
+ * Multiplayer server:
  *   Players find each other through a PeerJS signaling server. By default the
  *   free public PeerJS cloud is used, so the game keeps working on static
- *   hosting (GitHub Pages). To use your own server (see /server in the repo),
- *   set `peer` below, e.g.:
+ *   hosting (GitHub Pages) - but accounts, cloud saves, the public room list
+ *   and match history need your own multiplayer server (see /server in the
+ *   repository). Set its base URL in `server`, e.g.:
  *
- *     peer: { host: 'play.example.com', port: 443, path: '/peerjs', secure: true }
+ *     server: 'https://mp.example.com'
  *
- *   It can also be set per-page with the `?mp_server=wss://host:port/path`
- *   query parameter.
+ *   It can also be set per-page with the `?mp_server=https://host` query
+ *   parameter.
  *
  * NAT traversal:
  *   STUN is enough for most home connections. Players behind strict
@@ -21,7 +22,7 @@
  */
 window.PVZ_MP_CONFIG = Object.assign(
   {
-    peer: null,
+    server: null,
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
