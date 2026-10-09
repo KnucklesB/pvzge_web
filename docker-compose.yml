@@ -1,6 +1,6 @@
 # Self-hosted game + multiplayer server (signaling, accounts, cloud saves,
 # public rooms, match history):
-#   docker compose up -d   ->   http://localhost:8080
+#   docker compose up -d --build --remove-orphans   ->   http://localhost:8080
 services:
   game:
     build: .
@@ -18,7 +18,13 @@ services:
     environment:
       PROXIED: "true"
     volumes:
+      # Accounts, cloud saves and match history live here: keep this volume.
       - multiplayer-data:/data
+    networks:
+      default:
+        # Also reachable by the service name used by older compose files.
+        aliases:
+          - signaling
     restart: unless-stopped
 
 volumes:
