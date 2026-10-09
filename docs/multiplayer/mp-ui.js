@@ -165,17 +165,21 @@
   UI.openLobby = function (state) {
     lobbyOpen = true;
     lobbyState = null;
+    lobbyKey = null;
     UI.renderLobby(state);
   };
 
   UI.closeLobby = function () {
     lobbyOpen = false;
     lobbyState = null;
+    lobbyKey = null;
+    lobbyBackdrop = null;
+    UI.closeZombieChooser();
     closeModal();
   };
 
   UI.rebuildLobby = function (state) {
-    if (lobbyOpen) UI.renderLobby(state);
+    if (lobbyOpen) UI.renderLobby(state, true);
   };
 
   // Re-rendering keeps what the player typed, the focus and scroll positions:
@@ -205,8 +209,17 @@
     });
   }
 
-  UI.renderLobby = function (state) {
+  var lobbyKey = null;
+  var lobbyBackdrop = null;
+
+  UI.renderLobby = function (state, force) {
     if (!lobbyOpen || !root) return;
+    // Nothing visible changed (e.g. a room list refresh with the same rooms):
+    // keep the DOM as is, so nothing flickers.
+    var key = MP.lang + '|' + (MP.cards && MP.cards.ready) + '|' + JSON.stringify(state);
+    var mounted = lobbyBackdrop && lobbyBackdrop.isConnected;
+    if (!force && mounted && key === lobbyKey) return;
+    lobbyKey = key;
     var sameView = lobbyState && lobbyState.view === state.view && lobbyState.tab === state.tab;
     var snap = sameView ? snapshot() : null;
     lobbyState = state;
@@ -232,13 +245,20 @@
     if (state.view === 'home') renderHome(win, state);
     else if (state.view === 'busy') renderBusy(win, state);
     else renderRoom(win, state);
-    var bd = openModal(win);
-    bd.addEventListener('mousedown', function (e) {
-      e.stopPropagation();
-    });
-    bd.addEventListener('wheel', function (e) {
-      e.stopPropagation();
-    });
+    if (mounted && lobbyBackdrop.parentNode === layers.modal) {
+      // Update in place: same backdrop, no open animation, no flash.
+      lobbyBackdrop.classList.add('mp-steady');
+      lobbyBackdrop.replaceChildren(win);
+    } else {
+      var bd = openModal(win);
+      bd.addEventListener('mousedown', function (e) {
+        e.stopPropagation();
+      });
+      bd.addEventListener('wheel', function (e) {
+        e.stopPropagation();
+      });
+      lobbyBackdrop = bd;
+    }
     if (snap) restore(snap);
   };
 
@@ -529,33 +549,197 @@
     return String(v);
   }
 
-  function renderDeck(state, s) {
-    var st = MP.STAGES[s.stage] || MP.STAGES.modern;
-    var deck = s.zdeck || [];
-    var box = el('div.mp-deck');
-    st.zombies.forEach(function (type) {
-      var pos = deck.indexOf(type);
-      var c = MP.zombieCost(type);
-      var chip = el(
-        'button.mp-zchip' + (pos >= 0 ? '.mp-on' : ''),
-        {
-          disabled: !state.canEditDeck,
-          title: MP.zombieName(type),
-          onclick: function () {
-            call('toggleDeck', type);
-          },
-        },
-        [
-          el('span.mp-zchip-name', { text: MP.zombieName(type) }),
-          el('span.mp-zchip-cost', null, [iconEl('brain', 'mp-zchip-brain'), String(c.cost)]),
-          pos >= 0 ? el('span.mp-zchip-n', { text: String(pos + 1) }) : null,
-        ],
-      );
-      chip.style.backgroundImage = 'var(--mp-img-' + st.img + ')';
-      box.appendChild(chip);
+  // One zombie seed packet: the game's own artwork plus brain cost.
+  function zombiePacket(type, opts) {
+    opts = opts || {};
+    var c = MP.zombieCost(type);
+    var art = MP.cards && MP.cards.zombie(type);
+    var node = el(
+      (opts.button ? 'button' : 'div') + '.mp-zpacket' + (opts.cls ? '.' + opts.cls : '') + (art ? '' : '.mp-noart'),
+      { title: MP.zombieName(type), 'data-type': type, disabled: opts.disabled, onclick: opts.onclick || null },
+      [
+        el('img.mp-zpacket-art', { src: art || null, alt: '', draggable: 'false' }),
+        el('span.mp-zpacket-name', { text: MP.zombieName(type) }),
+        el('span.mp-zpacket-cost', null, [iconEl('brain', 'mp-zchip-brain'), String(c.cost)]),
+        opts.n ? el('span.mp-zchip-n', { text: String(opts.n) }) : null,
+      ],
+    );
+    return node;
+  }
+  UI.zombiePacket = zombiePacket;
+
+  // Artwork finished drawing: fill every packet of that zombie on screen.
+  UI.fillZombieArt = function (type, url) {
+    if (!root) return;
+    root.querySelectorAll('.mp-zpacket.mp-noart[data-type="' + type + '"]').forEach(function (p) {
+      var img = p.querySelector('.mp-zpacket-art');
+      if (img) img.src = url;
+      p.classList.remove('mp-noart');
     });
+  };
+
+  // The current deck as a row of packets (read-only in the room).
+  function renderDeck(state, s) {
+    var deck = s.zdeck || [];
+    var row = el('div.mp-zdeck-row');
+    for (var i = 0; i < MP.DECK_SIZE; i++) {
+      row.appendChild(deck[i] ? zombiePacket(deck[i], { n: i + 1 }) : el('div.mp-zpacket.mp-empty-slot'));
+    }
+    var box = el('div.mp-zdeck', null, [row]);
+    if (state.canEditDeck) {
+      box.appendChild(
+        el('button.mp-btn.mp-small.mp-green', {
+          text: t('choose_zombies'),
+          onclick: function () {
+            call('openZombieChooser');
+          },
+        }),
+      );
+    }
     return box;
   }
+
+  /* ------------------------------------------------ zombie seed chooser */
+
+  // Big window like the game's seed chooser: chosen packets on top, every
+  // available zombie below, filtered by world.
+  var chooser = null;
+  var chooserWorld = 'all';
+
+  UI.isZombieChooserOpen = function () {
+    return !!chooser;
+  };
+
+  UI.openZombieChooser = function (opts) {
+    UI.closeZombieChooser();
+    chooser = { opts: opts };
+    var win = el('div.mp-window.mp-zchooser.mp-interactive');
+    win.appendChild(el('button.mp-close', { title: t('close'), onclick: function () {
+      UI.closeZombieChooser();
+    } }));
+    win.appendChild(el('div.mp-window-title', { text: t('choose_zombies') }));
+    win.appendChild(el('div.mp-window-sub', { text: t('choose_zombies_desc', { n: MP.DECK_SIZE }) }));
+    var bank = el('div.mp-zbank');
+    var tabs = el('div.mp-seg.mp-ztabs');
+    var grid = el('div.mp-zgrid.mp-scroll');
+    var footer = el('div.mp-results-actions', null, [
+      el('button.mp-btn.mp-brown', { text: t('reset_deck'), onclick: function () {
+        call('resetDeck');
+      } }),
+      el('button.mp-btn.mp-green.mp-big', { text: t('done'), onclick: function () {
+        UI.closeZombieChooser();
+      } }),
+    ]);
+    win.appendChild(el('div.mp-panel', null, [bank]));
+    win.appendChild(el('div.mp-panel.mp-zgrid-panel', null, [tabs, grid]));
+    win.appendChild(footer);
+    var bd = el('div.mp-backdrop.mp-dialog-layer', null, win);
+    bd.addEventListener('mousedown', function (e) {
+      e.stopPropagation();
+    });
+    bd.addEventListener('wheel', function (e) {
+      e.stopPropagation();
+    });
+    root.appendChild(bd);
+    chooser.node = bd;
+    chooser.bank = bank;
+    chooser.tabs = tabs;
+    chooser.grid = grid;
+    renderChooserTabs();
+    renderChooserGrid();
+    UI.updateZombieChooser(opts.deck);
+  };
+
+  function worldLabel(w) {
+    var key = 'world_' + w;
+    var s = t(key);
+    return s === key ? w : s;
+  }
+
+  function renderChooserTabs() {
+    var c = chooser;
+    var worlds = [];
+    c.opts.choices.forEach(function (z) {
+      if (worlds.indexOf(z.world) < 0) worlds.push(z.world);
+    });
+    if (worlds.indexOf(chooserWorld) < 0) chooserWorld = 'all';
+    c.tabs.innerHTML = '';
+    ['all'].concat(worlds).forEach(function (w) {
+      c.tabs.appendChild(
+        el('button' + (w === chooserWorld ? '.mp-on' : ''), {
+          text: w === 'all' ? t('world_all') : worldLabel(w),
+          onclick: function () {
+            chooserWorld = w;
+            renderChooserTabs();
+            renderChooserGrid();
+          },
+        }),
+      );
+    });
+  }
+
+  function renderChooserGrid() {
+    var c = chooser;
+    c.grid.innerHTML = '';
+    c.grid.scrollTop = 0;
+    var shown = [];
+    c.opts.choices.forEach(function (z) {
+      if (chooserWorld !== 'all' && z.world !== chooserWorld) return;
+      shown.push(z.type);
+      c.grid.appendChild(
+        zombiePacket(z.type, {
+          button: true,
+          onclick: function () {
+            call('toggleDeck', z.type);
+          },
+        }),
+      );
+    });
+    if (MP.cards && MP.cards.prioritize) MP.cards.prioritize(shown);
+    markChosen();
+  }
+
+  function markChosen() {
+    var deck = chooser.deck || [];
+    chooser.grid.querySelectorAll('.mp-zpacket').forEach(function (p) {
+      p.classList.toggle('mp-chosen', deck.indexOf(p.getAttribute('data-type')) >= 0);
+    });
+  }
+
+  UI.updateZombieChooser = function (deck) {
+    if (!chooser) return;
+    chooser.deck = (deck || []).slice();
+    chooser.bank.innerHTML = '';
+    for (var i = 0; i < MP.DECK_SIZE; i++) {
+      var type = chooser.deck[i];
+      chooser.bank.appendChild(
+        type
+          ? zombiePacket(type, {
+              button: true,
+              n: i + 1,
+              onclick: (function (ty) {
+                return function () {
+                  call('toggleDeck', ty);
+                };
+              })(type),
+            })
+          : el('div.mp-zpacket.mp-empty-slot'),
+      );
+    }
+    markChosen();
+  };
+
+  // New packet artwork became available (lazy load): redraw in place.
+  UI.refreshZombieArt = function () {
+    if (!chooser) return;
+    renderChooserGrid();
+    UI.updateZombieChooser(chooser.deck);
+  };
+
+  UI.closeZombieChooser = function () {
+    if (chooser && chooser.node) chooser.node.remove();
+    chooser = null;
+  };
 
   function renderRoom(win, state) {
     var s = state.settings;
@@ -1160,6 +1344,34 @@
     var w = vw * scale;
     var h = vh * scale;
     return { left: box.left + (box.width - w) / 2, top: box.top + (box.height - h) / 2, width: w, height: h };
+  };
+
+  /* --------------------------------------------------------- loading bar */
+
+  var loadingBar = null;
+  // info: {frame:{left,top,width,height}, pct, text} or null to hide.
+  UI.renderLoading = function (info) {
+    if (!root) return;
+    if (!info || !info.frame) {
+      if (loadingBar) loadingBar.remove();
+      loadingBar = null;
+      return;
+    }
+    if (!loadingBar) {
+      loadingBar = el('div.mp-loading', null, [
+        el('div.mp-loading-text'),
+        el('div.mp-loading-track', null, [el('div.mp-loading-fill'), el('div.mp-loading-sprout')]),
+      ]);
+      root.insertBefore(loadingBar, layers.toasts);
+    }
+    var f = info.frame;
+    loadingBar.style.left = f.left + f.width / 2 + 'px';
+    loadingBar.style.top = f.top + f.height * 0.82 + 'px';
+    loadingBar.style.width = Math.min(560, f.width * 0.6) + 'px';
+    loadingBar.firstChild.textContent = info.text || t('loading');
+    var pct = Math.max(0, Math.min(100, info.pct || 0));
+    loadingBar.querySelector('.mp-loading-fill').style.width = pct + '%';
+    loadingBar.querySelector('.mp-loading-sprout').style.left = pct + '%';
   };
 
   /* -------------------------------------------------------------- results */

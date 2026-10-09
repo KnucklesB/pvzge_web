@@ -119,10 +119,36 @@
     this.lobbyError = null;
     UI.openLobby(this.lobbyState());
     this.onTabShown();
+    if (!MP.cards.ready) {
+      var self = this;
+      MP.cards.load().then(function (ok) {
+        if (ok) UI.refreshZombieArt();
+      });
+    }
   };
 
   App.refreshLobby = function () {
     if (UI.isLobbyOpen()) UI.renderLobby(this.lobbyState());
+    this.syncZombieChooser();
+  };
+
+  /* zombie packet chooser (Versus, zombie player) */
+
+  App.canEditDeck = function () {
+    return !!this.session && this.phase === 'lobby' && this.settings.mode === 'versus' && this.mySide() === 'zombies';
+  };
+
+  App.openZombieChooser = function () {
+    if (!this.canEditDeck()) return;
+    this._chooserKey = this.settings.stage + '|' + this.settings.zombiePool;
+    UI.openZombieChooser({ deck: this.settings.zdeck, choices: MP.zombieChoices(this.settings.stage, this.settings.zombiePool) });
+  };
+
+  App.syncZombieChooser = function () {
+    if (!UI.isZombieChooserOpen()) return;
+    if (!this.canEditDeck()) return UI.closeZombieChooser();
+    if (this._chooserKey !== this.settings.stage + '|' + this.settings.zombiePool) return this.openZombieChooser();
+    UI.updateZombieChooser(this.settings.zdeck);
   };
 
   App.rebuildLobby = function () {
@@ -161,6 +187,7 @@
     this.guestReady = false;
     this.roomKey = MP.util.randomCode(24);
     var s = (this.session = new MP.Session());
+    G.setKeepAlive(true);
     bindSession(s);
     this.refreshLobby();
     var self = this;
@@ -197,6 +224,7 @@
     this.phase = 'lobby';
     this.guestReady = false;
     var s = (this.session = new MP.Session());
+    G.setKeepAlive(true);
     bindSession(s);
     this.refreshLobby();
     var self = this;
@@ -238,6 +266,9 @@
   };
 
   App.teardown = function () {
+    G.setKeepAlive(false);
+    UI.closeZombieChooser();
+    UI.renderLoading(null);
     if (this.match) {
       this.match.dispose();
       this.match = null;
@@ -271,7 +302,7 @@
   // The zombie player picks their deck in the lobby.
   App.setDeck = function (deck) {
     if (this.settings.mode !== 'versus' || this.mySide() !== 'zombies') return;
-    deck = MP.validDeck(this.settings.stage, deck);
+    deck = MP.validDeck(this.settings.stage, deck, this.settings.zombiePool);
     if (this.role === 'host') {
       this.settings.zdeck = deck;
       MP.store.set('settings', this.settings);
@@ -341,12 +372,12 @@
 
   /* ===================================================== online features */
 
-  App.loadRooms = function () {
+  App.loadRooms = function (silent) {
     var self = this;
     if (!api.available() || this.rooms.loading) return;
-    this.rooms.loading = true;
+    this.rooms.loading = !silent;
     this.rooms.error = null;
-    this.refreshLobby();
+    if (!silent) this.refreshLobby();
     api
       .rooms()
       .then(
@@ -595,7 +626,7 @@
         break;
       case 'zdeck':
         if (this.settings.mode === 'versus' && this.settings.hostSide === 'plants' && this.phase === 'lobby') {
-          this.settings.zdeck = MP.validDeck(this.settings.stage, msg.deck);
+          this.settings.zdeck = MP.validDeck(this.settings.stage, msg.deck, this.settings.zombiePool);
           this.broadcastLobby();
           this.refreshLobby();
         }
@@ -934,7 +965,24 @@
     return r ? { left: r.left, top: r.top, width: r.width, height: r.height } : null;
   };
 
+  // Loading bar while a level/scene loads: our own, or the host's (shared lawn).
+  App.renderLoading = function () {
+    if (!this.session || this.phase !== 'match') return UI.renderLoading(null);
+    var own = G.loadingState();
+    var watching = this.role === 'guest' && this.settings.mode !== 'survival';
+    var info = watching ? this.hud && this.hud.loading : own;
+    var frame = info && this.frameRect();
+    if (!info || !frame) {
+      // The guest's video may not have its first frame yet: use the window.
+      if (info && watching) frame = { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+      else return UI.renderLoading(null);
+    }
+    var text = watching ? t('host_loading', { name: this.session.remoteName }) : t('loading_level');
+    UI.renderLoading({ frame: frame, pct: info.pct, text: text + ' ' + info.pct + '%' });
+  };
+
   App.renderOverlays = function () {
+    this.renderLoading();
     if (!this.session || this.phase !== 'match' || this.settings.mode === 'survival') {
       UI.renderStage(null);
       UI.renderVersusHud(null);
@@ -1257,6 +1305,12 @@
       toggleDeck: function (type) {
         App.toggleDeckZombie(type);
       },
+      openZombieChooser: function () {
+        App.openZombieChooser();
+      },
+      resetDeck: function () {
+        App.setDeck(MP.defaultDeck(App.settings.stage));
+      },
       ready: function (v) {
         App.ready(v);
       },
@@ -1345,7 +1399,7 @@
       App.publishRoom();
     }, PUBLISH_INTERVAL);
     setInterval(function () {
-      if (!App.session && App.tab === 'rooms' && UI.isLobbyOpen()) App.loadRooms();
+      if (!App.session && App.tab === 'rooms' && UI.isLobbyOpen()) App.loadRooms(true);
     }, ROOMS_REFRESH);
 
     G.init().then(function () {
@@ -1357,6 +1411,9 @@
       }, true);
       G.on('scene', onScene);
       G.on('frame', onFrame);
+      MP.cards.on('art', function (type, url) {
+        UI.fillZombieArt(type, url);
+      });
       MP.cloud.on('conflict', function (c) {
         UI.showCloudConflict(c);
       });

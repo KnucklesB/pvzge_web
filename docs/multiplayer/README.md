@@ -36,6 +36,7 @@ bundle is not modified.
 | `mp-game.js` | Bridge to the game internals: modules, coordinates, actions, hooks. |
 | `mp-skin.js` | Cuts the game's own sprites/fonts at runtime for the HTML UI. |
 | `mp-ui.js` / `mp.css` | Lobby, HUD, overlays, stream viewer, results, chat, toasts. |
+| `mp-cards.js` | Draws zombie seed packets (world background + portrait) from the game's DragonBones atlases for the lobby's zombie chooser. |
 | `mp-modes.js` | Options, arenas/zombie decks, generated levels, plant/zombie seats, `SoloRun`, `Match`. |
 | `mp-app.js` | Controller tying session, lobby, match and overlays together; main menu button. |
 | `vendor/peerjs.min.js` | PeerJS 1.5.4 (MIT). |
@@ -63,6 +64,12 @@ methods above, `Square` (`getLnC`, `judgeLIndex/judgeCIndex`, `lawnRec`),
 `dropping.prototype.characterUpdate`, `SandBoxZombieCards`, `zombies`,
 `LevelPlay.component.isSeedChooserMode`, `AllPlayerProperties.savePP` and the
 `PvZ2_PlayerProperties` / `PvZ2_Settings` localStorage keys.
+
+While a room is open the engine's auto-pause on hidden tabs
+(`cc.game.pauseByEngine`) is disabled and, when the browser throttles
+`requestAnimationFrame`, frames are driven from a worker timer through
+`cc.game._updateCallback`, so a host that switches tabs (or plays on the same
+PC as the guest) keeps the match running.
 
 ## Server API (`/server`)
 

@@ -40,10 +40,10 @@ Click **Multiplayer** on the main menu to play with a friend over the internet. 
 | Mode | How it plays |
 | --- | --- |
 | **Co-op** | Shared lawn: the host plays any level of the game (campaign, endless zones, minigames). Both players share sun, seed packets and plant food, each with their own cursor, and both can pick seeds. |
-| **Versus** | Shared lawn: the plant player picks plants in the game's seed chooser; the zombie player builds a 6-zombie deck in the lobby and spends brains to send zombies down any lane. Plants win by holding until the timer runs out; zombies win by reaching the house. |
+| **Versus** | Shared lawn: the plant player picks plants in the game's seed chooser; the zombie player builds a 6-zombie deck in the lobby with a seed chooser that shows the game's own zombie packets (every almanac zombie of every world, or only the arena's zombies) and spends brains to send zombies down any lane. Plants win by holding until the timer runs out; zombies win by reaching the house. |
 | **Survival** | One lawn per player: both run the same generated level with ever-growing waves on their own screen and watch each other's lawn live (picture-in-picture, can be enlarged). Whoever lasts more waves wins. |
 
-Match options (host): arena, side, duration, waves, difficulty, available plants (all, classic or own collection), seed slots, starting sun, sky sun rate, plant recharge, lawn mowers, starting brains, brain income, zombie recharge, stream quality and room visibility.
+Match options (host): arena, side, duration, waves, difficulty, available plants (all, classic or own collection), seed slots, starting sun, sky sun rate, plant recharge, lawn mowers, available zombies, starting brains, brain income, zombie recharge, stream quality and room visibility.
 
 After a match both players stay in the room: rematch, change settings or leave. Either player can end a match early from the side panel. `Enter` opens the chat. The screens are available in English, Português and 中文.
 

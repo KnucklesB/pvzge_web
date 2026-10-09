@@ -37,6 +37,7 @@
     sunRate: { modes: ['versus', 'survival'], values: ['slow', 'normal', 'fast', 'very_fast'], def: 'normal', label: 'sun_rate', fmt: 'rate_' },
     plantCooldown: { modes: ['versus', 'survival'], values: [0.5, 1, 1.5], def: 1, label: 'plant_cooldown', fmt: 'mult' },
     mowers: { modes: ['versus', 'survival'], values: ['on', 'off'], def: 'on', label: 'mowers', fmt: 'onoff_' },
+    zombiePool: { modes: ['versus'], values: ['all', 'arena'], def: 'all', label: 'zombie_pool', fmt: 'zpool_' },
     startBrains: { modes: ['versus'], values: [100, 200, 400, 800], def: 200, label: 'start_brains' },
     brainRate: { modes: ['versus'], values: [0.75, 1, 1.5, 2], def: 1, label: 'brain_rate', fmt: 'mult' },
     zombieCooldown: { modes: ['versus'], values: [0.5, 0.75, 1, 1.5], def: 1, label: 'zombie_cooldown', fmt: 'mult' },
@@ -56,7 +57,7 @@
     Object.keys(MP.OPTIONS).forEach(function (k) {
       if (MP.OPTIONS[k].values.indexOf(out[k]) < 0) out[k] = MP.OPTIONS[k].def;
     });
-    out.zdeck = MP.validDeck(out.stage, out.zdeck);
+    out.zdeck = MP.validDeck(out.stage, out.zdeck, out.zombiePool);
     return out;
   };
 
@@ -112,10 +113,32 @@
       .slice(0, MP.DECK_SIZE);
   };
 
-  MP.validDeck = function (stage, deck) {
+  // Zombies the zombie player may pick: the arena's own, or the whole almanac.
+  MP.zombieChoices = function (stage, pool) {
     var st = MP.STAGES[stage] || MP.STAGES.modern;
+    var all = MP.cards ? MP.cards.catalog() : [];
+    if (pool === 'arena' || !all.length) {
+      return st.zombies.map(function (type) {
+        var hit = all.find(function (z) {
+          return z.type === type;
+        });
+        return { type: type, world: hit ? hit.world : st.img };
+      });
+    }
+    return all;
+  };
+
+  MP.validDeck = function (stage, deck, pool) {
+    // Before the game has loaded the almanac can't be read yet: keep the deck.
+    var catalogReady = MP.cards && MP.cards.catalog().length > 0;
+    var allowed =
+      pool === 'arena' || catalogReady
+        ? MP.zombieChoices(stage, pool).map(function (z) {
+            return z.type;
+          })
+        : null;
     var out = (Array.isArray(deck) ? deck : []).filter(function (z, i, a) {
-      return st.zombies.indexOf(z) >= 0 && a.indexOf(z) === i;
+      return typeof z === 'string' && (!allowed || allowed.indexOf(z) >= 0) && a.indexOf(z) === i;
     });
     out = out.slice(0, MP.DECK_SIZE);
     return out.length ? out : MP.defaultDeck(stage);
@@ -373,7 +396,7 @@
    */
   function ZombieSeat(settings, stats) {
     var cdMult = Number(settings.zombieCooldown) || 1;
-    this.deck = MP.validDeck(settings.stage, settings.zdeck)
+    this.deck = MP.validDeck(settings.stage, settings.zdeck, settings.zombiePool)
       .filter(G.zombieExists)
       .map(function (type) {
         var c = MP.zombieCost(type);
@@ -828,7 +851,7 @@
 
   // State mirrored to the guest (and used for the host's own overlay).
   Match.prototype.hud = function () {
-    var out = { mode: this.mode, phase: this.phase, seat: this.guestSeat(), paused: G.isPaused() };
+    var out = { mode: this.mode, phase: this.phase, seat: this.guestSeat(), paused: G.isPaused(), loading: G.loadingState() };
     if (this.plantSeat) {
       var ps = this.plantSeat.state();
       out.sel = ps.sel;

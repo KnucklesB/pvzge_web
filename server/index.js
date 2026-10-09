@@ -23,7 +23,7 @@ const { ExpressPeerServer } = require('peer');
 const { Store } = require('./store');
 const auth = require('./auth');
 
-const VERSION = '2.0.0';
+const VERSION = '2.1.0';
 const PORT = Number(process.env.PORT) || 9000;
 const MAX_SAVE = (Number(process.env.MAX_SAVE_MB) || 8) * 1024 * 1024;
 const ORIGINS = (process.env.ALLOWED_ORIGINS || '*')

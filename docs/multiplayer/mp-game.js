@@ -433,8 +433,120 @@
     remoteChooser: false,
   };
 
+  /* ------------------------------------------------------ keep running */
+  // Browsers stop requestAnimationFrame in background tabs and Cocos pauses
+  // itself when the page is hidden. During online play the host (and every
+  // player in Survival) must keep simulating and streaming, so while
+  // keep-alive is on the engine's auto-pause is disabled and a worker timer
+  // (not throttled like page timers) drives frames whenever rAF has stalled.
+
+  var keep = { on: false, worker: null, lastRaf: performance.now() };
+  (function watchRaf() {
+    keep.lastRaf = performance.now();
+    requestAnimationFrame(watchRaf);
+  })();
+
+  function onKeepTick() {
+    var game = G.cc && G.cc.game;
+    // Only for real background tabs: a visible page always has rAF, and
+    // extra frames on a slow machine would just starve the main thread.
+    if (!keep.on || !game || game.isPaused() || !document.hidden) return;
+    if (performance.now() - keep.lastRaf < 250) return; // rAF is alive
+    try {
+      game._updateCallback();
+    } catch (e) {
+      MP.warn('background frame failed', e);
+    }
+  }
+
+  G.setKeepAlive = function (on) {
+    on = !!on;
+    var game = G.cc && G.cc.game;
+    if (!game || on === keep.on) return;
+    keep.on = on;
+    if (on) {
+      game.pauseByEngine = function () {};
+      if (game._pausedByEngine) game.resumeByEngine();
+      if (!keep.worker && window.Worker && window.Blob) {
+        try {
+          var url = URL.createObjectURL(new Blob(['setInterval(function(){postMessage(0)},33);'], { type: 'text/javascript' }));
+          keep.worker = new Worker(url);
+          keep.worker.onmessage = onKeepTick;
+        } catch (e) {
+          MP.warn('background worker unavailable', e);
+        }
+      }
+    } else {
+      delete game.pauseByEngine; // back to the prototype's behaviour
+      if (keep.worker) {
+        keep.worker.terminate();
+        keep.worker = null;
+      }
+      if (document.hidden) game.pauseByEngine();
+    }
+  };
+
+  G.keepAliveOn = function () {
+    return keep.on;
+  };
+
+  /* ----------------------------------------------------------- loading */
+  // Scene/level transitions go through KeyListener's static helpers; count
+  // them and the files fetched meanwhile to drive a loading bar.
+
+  var load = { depth: 0, files: 0, since: 0 };
+  G.loadingState = function () {
+    if (!load.depth) return null;
+    // No total is known up front: approach 95% as files keep arriving.
+    var pct = Math.min(95, Math.round(100 * (1 - Math.exp(-load.files / 120))));
+    return { pct: Math.max(3, pct), files: load.files, ms: Math.round(performance.now() - load.since) };
+  };
+
+  function wrapLoading(KL, name) {
+    var orig = KL[name];
+    if (typeof orig !== 'function' || orig._mpWrapped) return;
+    var wrapped = function () {
+      if (!load.depth++) {
+        load.files = 0;
+        load.since = performance.now();
+        G.emit('loading', true);
+      }
+      var done = function () {
+        if (load.depth > 0 && !--load.depth) G.emit('loading', false);
+      };
+      var r;
+      try {
+        r = orig.apply(this, arguments);
+      } catch (e) {
+        done();
+        throw e;
+      }
+      if (r && typeof r.then === 'function') r.then(done, done);
+      else done();
+      return r;
+    };
+    wrapped._mpWrapped = true;
+    KL[name] = wrapped;
+  }
+
+  function installLoadingHooks() {
+    var KL = G.KL();
+    if (!KL) return;
+    ['goToLevel', 'GoToGame', 'GoToScene'].forEach(function (n) {
+      wrapLoading(KL, n);
+    });
+    if (window.PerformanceObserver) {
+      try {
+        new PerformanceObserver(function (list) {
+          if (load.depth) load.files += list.getEntries().length;
+        }).observe({ type: 'resource', buffered: false });
+      } catch (e) {}
+    }
+  }
+
   function installHooks() {
     var cc = G.cc;
+    installLoadingHooks();
 
     // 0. Let the guest drive the native seed chooser: their clicks are replayed
     //    as synthetic DOM events, and the host's real mouse is held back.
@@ -604,6 +716,7 @@
             card.ca.cooling = false;
           });
           sb.index = -1;
+          if (MP.cards) MP.cards.learnFrom(sb.zombieCards[0]);
           resolve(sb);
         } else if (++tries < 100) setTimeout(wait, 50);
         else resolve(null);

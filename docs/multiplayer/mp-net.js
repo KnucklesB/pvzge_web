@@ -20,7 +20,9 @@
   MP.QUALITY = QUALITY;
 
   var HEARTBEAT_MS = 1000;
-  var TIMEOUT_MS = 12000;
+  // Generous: loading a level can block a slow PC's main thread for a while;
+  // a really closed data channel is reported right away by its 'close' event.
+  var TIMEOUT_MS = 30000;
   var CONNECT_TIMEOUT_MS = 20000;
 
   function peerOptions() {
