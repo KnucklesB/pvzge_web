@@ -173,6 +173,18 @@
     closeModal();
   };
 
+  // Full re-render (e.g. after a language change), keeping typed values.
+  UI.rebuildLobby = function (state) {
+    if (!lobbyOpen) return;
+    if (homeNodes && state.view === 'home') {
+      state.name = homeNodes.name.value;
+      state.code = homeNodes.code.value;
+    }
+    homeNodes = null;
+    lobbyState = null;
+    UI.renderLobby(state);
+  };
+
   UI.renderLobby = function (state) {
     if (!lobbyOpen || !root) return;
     var prevView = lobbyState && lobbyState.view;
@@ -187,6 +199,19 @@
       call('closeLobby');
     } });
     win.appendChild(close);
+    var langs = el('div.mp-lang', { title: t('language'), 'aria-label': t('language') });
+    MP.LANGUAGES.forEach(function (l) {
+      langs.appendChild(
+        el('button' + (l.code === MP.lang ? '.mp-on' : ''), {
+          text: l.label,
+          lang: l.code,
+          onclick: function () {
+            if (l.code !== MP.lang) call('lang', l.code);
+          },
+        }),
+      );
+    });
+    win.appendChild(langs);
     win.appendChild(el('div.mp-window-title', { text: t('lobby_title') }));
     if (state.view === 'home') renderHome(win, state);
     else if (state.view === 'busy') renderBusy(win, state);

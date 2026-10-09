@@ -43,6 +43,8 @@ Click **Multiplayer** on the main menu to play with a friend over the internet. 
 | **Versus** | One player defends with plants, the other spends brains on zombie packets and picks the lanes to attack. Plants win if they hold until the timer runs out; zombies win by reaching the house. Five arenas, each with its own zombie deck. |
 | **Survival** | Both players defend together against generated, ever-growing waves (15, 30 or 60) on the chosen arena. |
 
+The multiplayer screens follow the game's language (English by default, or Chinese) and can be switched to English, Português or 中文 from the lobby.
+
 Guest controls: click seed packets (or `1`-`4`, `Q`-`R`), `D` shovel, `F` plant food, right click cancels. As zombies: click a packet (or `1`-`6`) and then a lane. `Enter` opens the chat.
 
 How it works: the host runs the real game and streams it to the guest over WebRTC (video + game audio); the guest's inputs are sent back over a data channel and executed through the game's own planting/shovel/plant-food code paths, so every plant, zombie and level behaves exactly as in single player. The code lives in [`docs/multiplayer`](docs/multiplayer) and does not modify the game bundle.

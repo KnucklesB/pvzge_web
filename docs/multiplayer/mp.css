@@ -237,6 +237,36 @@
   scrollbar-color: #e2a25e #3a2213;
 }
 
+.mp-lang {
+  position: absolute;
+  top: 22px;
+  left: 28px;
+  display: flex;
+  gap: 4px;
+  z-index: 3;
+}
+.mp-lang button {
+  height: 28px;
+  padding: 0 9px 2px;
+  border: 2px solid #2b1608;
+  border-radius: 9px;
+  background: #8a5a31;
+  color: #fff;
+  font-family: var(--mp-font);
+  font-size: 14px;
+  text-shadow: var(--mp-outline);
+  cursor: pointer;
+  opacity: 0.8;
+}
+.mp-lang button:hover {
+  opacity: 1;
+}
+.mp-lang button.mp-on {
+  background: linear-gradient(#5fd12e, #2b8e14);
+  border-color: #163f07;
+  opacity: 1;
+}
+
 /* --------------------------------------------------------------- forms */
 
 .mp-field {
@@ -1073,6 +1103,11 @@
   }
   .mp-window-title {
     font-size: 32px;
+    margin-top: 26px;
+  }
+  .mp-lang {
+    top: 14px;
+    left: 18px;
   }
   .mp-home {
     grid-template-columns: 1fr;

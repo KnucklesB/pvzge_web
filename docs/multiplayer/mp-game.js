@@ -32,6 +32,7 @@
     'ShovelUIController',
     'SoundRescourses',
     'CharacterManager',
+    'MultiLanguage',
   ];
 
   var G = (MP.game = new MP.Emitter());
@@ -609,6 +610,12 @@
       } catch (e) {}
       ui.paused = true;
     }
+  };
+
+  // The game itself ships English and Chinese.
+  G.gameLanguage = function () {
+    var ML = G.m.MultiLanguage && G.m.MultiLanguage.MultiLanguage;
+    return ML && ML.currentLanguage === 1 ? 'zh' : 'en';
   };
 
   G.localPlayerName = function () {

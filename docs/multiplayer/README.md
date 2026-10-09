@@ -22,7 +22,7 @@ bundle is not modified.
 | File | Role |
 | --- | --- |
 | `mp-config.js` | Signaling server / ICE configuration (overridable). |
-| `mp-core.js` | Namespace, events, storage, utilities, translations (pt / en). |
+| `mp-core.js` | Namespace, events, storage, utilities, translations (en / pt / zh, switchable in the lobby; defaults to the game's language). |
 | `mp-audio.js` | Routes WebAudio through a master gain + `MediaStream` tap. Must load before the engine. |
 | `mp-net.js` | `Session`: rooms, handshake, heartbeat/RTT, media stream and bitrate tuning. |
 | `mp-game.js` | Bridge to the game internals: modules, coordinates, actions, hooks. |

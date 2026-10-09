@@ -713,7 +713,10 @@
       }
     }
     var label = btn.getChildByName('Label');
-    if (label) label.getComponent(cc.Label).string = t('multiplayer');
+    if (label) {
+      label.getComponent(cc.Label).string = t('multiplayer');
+      App.menuLabel = label.getComponent(cc.Label);
+    }
     // Play and Multiplayer side by side, centred where Play used to be. The
     // buttons' Layout components resize them to their labels, so re-centre
     // whenever either size changes.
@@ -754,7 +757,24 @@
 
   /* ============================================================ wiring */
 
+  App.setLang = function (code) {
+    MP.setLang(code, true);
+  };
+
+  function onLang() {
+    if (App.menuLabel && App.menuLabel.isValid) App.menuLabel.string = t('multiplayer');
+    if (UI.isLobbyOpen()) UI.rebuildLobby(App.lobbyState());
+    UI.renderBadge(null);
+    App.updateBadge();
+  }
+
+  // Without an explicit choice, follow the game's language setting.
+  function followGameLanguage() {
+    if (!MP.langChosen && G.gameLanguage() !== MP.lang) MP.setLang(G.gameLanguage(), false);
+  }
+
   function onScene(name) {
+    followGameLanguage();
     if (name === 'mainScene') {
       MP.skin.build();
       App.injectMenuButton();
@@ -860,7 +880,11 @@
       chat: function (text) {
         App.chat(text);
       },
+      lang: function (code) {
+        App.setLang(code);
+      },
     });
+    MP.bus.on('lang', onLang);
     var join = MP.params.get('mp_join');
     if (join) App.pendingJoinCode = join.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
 
