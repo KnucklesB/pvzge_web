@@ -501,6 +501,44 @@
     this.rebuildLobby();
   };
 
+  App.passwordMode = function (on) {
+    this.account.changing = !!on;
+    this.account.error = null;
+    this.account.notice = null;
+    this.rebuildLobby();
+  };
+
+  App.changePassword = function (current, next, next2) {
+    var self = this;
+    var acc = this.account;
+    var user = api.user();
+    acc.error = null;
+    if (next.length < 6) acc.error = 'err_bad_password';
+    else if (next !== next2) acc.error = 'err_password_match';
+    if (acc.error || !user) return this.rebuildLobby();
+    acc.busy = true;
+    this.rebuildLobby();
+    api
+      .changePassword(current, next)
+      // The server ends every session of the account: log in again.
+      .then(function () {
+        return api.login(user.username, next);
+      })
+      .then(
+        function () {
+          acc.changing = false;
+          acc.notice = 'password_changed';
+        },
+        function (e) {
+          acc.error = { bad_credentials: 'err_bad_credentials', bad_password: 'err_bad_password', rate_limited: 'err_rate_limited', offline: 'err_network' }[e.code] || 'err_generic';
+        },
+      )
+      .then(function () {
+        acc.busy = false;
+        self.rebuildLobby();
+      });
+  };
+
   App.logout = function () {
     var self = this;
     api.logout().then(function () {
@@ -638,6 +676,20 @@
             );
           },
         });
+      },
+      function (e) {
+        UI.toast(t(apiErrorKey(e)), 'warn');
+      },
+    );
+  };
+
+  App.adminPassword = function (name) {
+    var pass = window.prompt(t('admin_password_prompt', { name: name }), '');
+    if (pass == null) return;
+    if (pass.length < 6) return UI.toast(t('err_bad_password'), 'warn');
+    api.adminSetPassword(name, pass).then(
+      function () {
+        UI.toast(t('admin_password_done', { name: name }), 'good', 6000);
       },
       function (e) {
         UI.toast(t(apiErrorKey(e)), 'warn');
@@ -1510,6 +1562,15 @@
       },
       adminExport: function (name) {
         App.adminExport(name);
+      },
+      adminPassword: function (name) {
+        App.adminPassword(name);
+      },
+      passwordMode: function (on) {
+        App.passwordMode(on);
+      },
+      changePassword: function (cur, a, b) {
+        App.changePassword(cur, a, b);
       },
       openAccount: function () {
         App.openAccount();

@@ -171,6 +171,10 @@
     });
   };
 
+  api.adminSetPassword = function (name, password) {
+    return api.request('POST', '/admin/users/' + encodeURIComponent(name) + '/password', { password: password });
+  };
+
   api.adminPutSave = function (name, data) {
     return api.request('PUT', '/admin/users/' + encodeURIComponent(name) + '/save', { data: data }, { timeout: 60000 }).then(function (r) {
       return r.save;

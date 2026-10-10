@@ -473,6 +473,7 @@
         p2 ? el('div.mp-field', null, [el('label.mp-label', { text: t('password_repeat') }), p2]) : null,
         submit,
         el('div.mp-error', { text: acc.error ? t(acc.error) : '' }),
+        !reg ? el('div.mp-note.mp-center', { text: t('forgot_password') }) : null,
       ]);
       var why = el('div.mp-panel.mp-account-why', null, [
         el('div.mp-panel-title', { text: t('account_why') }),
@@ -498,9 +499,17 @@
       ]),
       el('div.mp-note', { text: t('member_since', { date: new Date(user.createdAt).toLocaleDateString() }) }),
       el('div.mp-stats-grid', null, [stat(t('stat_matches'), st.matches), stat(t('stat_wins'), st.wins), stat(t('stat_versus_wins'), st.versusWins), stat(t('stat_best_wave'), st.bestWave)]),
-      el('div.mp-account-actions', null, [el('button.mp-btn.mp-small.mp-red', { text: t('logout'), onclick: function () {
-        call('logout');
-      } })]),
+      acc.changing ? passwordForm(acc) : null,
+      el('div.mp-account-actions', null, [
+        acc.changing
+          ? null
+          : el('button.mp-btn.mp-small.mp-brown', { text: t('change_password'), onclick: function () {
+              call('passwordMode', true);
+            } }),
+        el('button.mp-btn.mp-small.mp-red', { text: t('logout'), onclick: function () {
+          call('logout');
+        } }),
+      ]),
     ]);
     var c = state.cloud;
     var statusText = c.status === 'syncing' ? t('cloud_syncing') : c.status === 'conflict' ? t('cloud_conflict_short') : c.status === 'error' || c.status === 'offline' ? t('cloud_error') : c.lastSync ? t('cloud_synced_at', { when: timeAgo(c.lastSync) }) : t('cloud_never');
@@ -521,6 +530,36 @@
     if (acc.notice) body.appendChild(el('div.mp-status', { text: t(acc.notice) }));
     renderSaveTools(body, state);
     if (user.admin) renderAdminPanel(body, state);
+  }
+
+  function passwordForm(acc) {
+    var cur = input(null, { 'data-k': 'pw-cur', type: 'password', maxlength: 128, placeholder: t('current_password'), autocomplete: 'current-password' });
+    var n1 = input(null, { 'data-k': 'pw-new', type: 'password', maxlength: 128, placeholder: t('new_password'), autocomplete: 'new-password' });
+    var n2 = input(null, { 'data-k': 'pw-new2', type: 'password', maxlength: 128, placeholder: t('password_repeat'), autocomplete: 'new-password' });
+    var save = el('button.mp-btn.mp-small.mp-green', {
+      text: acc.busy ? t('loading') : t('change_password'),
+      disabled: acc.busy,
+      onclick: function () {
+        call('changePassword', cur.value, n1.value, n2.value);
+      },
+    });
+    [cur, n1, n2].forEach(function (i) {
+      i.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') save.click();
+      });
+    });
+    return el('div.mp-account-form.mp-password-form', null, [
+      cur,
+      n1,
+      n2,
+      el('div.mp-account-actions', null, [
+        save,
+        el('button.mp-btn.mp-small.mp-brown', { text: t('editor_cancel'), onclick: function () {
+          call('passwordMode', false);
+        } }),
+      ]),
+      el('div.mp-error', { text: acc.error ? t(acc.error) : '' }),
+    ]);
   }
 
   /* -------------------------------------------------------- save tools */
@@ -573,6 +612,9 @@
             el('div.mp-list-title', null, [u.username, u.admin ? el('span.mp-player-tag.mp-host', { text: t('admin_badge') }) : null]),
             el('div.mp-list-sub', { text: u.save ? timeAgo(u.save.updatedAt) + ' • ' + Math.max(1, Math.round(u.save.size / 1024)) + ' KB' : t('admin_no_save') }),
           ]),
+          el('button.mp-btn.mp-small.mp-brown', { text: t('admin_password'), onclick: function () {
+            call('adminPassword', u.username);
+          } }),
           el('button.mp-btn.mp-small.mp-brown', { text: t('admin_export'), disabled: !u.save, onclick: function () {
             call('adminExport', u.username);
           } }),

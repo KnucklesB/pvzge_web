@@ -284,6 +284,52 @@ app.put('/api/admin/users/:name/save', limit('admin', 60), requireAdmin, bigJson
   res.json({ save: saved });
 });
 
+// Sets a new password for a player who forgot theirs (their sessions end).
+app.post('/api/admin/users/:name/password', limit('admin', 30), requireAdmin, json, async (req, res) => {
+  const u = targetUser(req, res);
+  if (!u) return;
+  const password = typeof (req.body && req.body.password) === 'string' ? req.body.password : '';
+  if (password.length < 6 || password.length > 128) return res.status(400).json({ error: 'bad_password' });
+  store.setPassword(u.id, await auth.hashPassword(password));
+  console.log('[admin] %s set a new password for %s', req.user.username, u.username);
+  res.json({ ok: true });
+});
+
+// Server maintenance (cli.js) -------------------------------------------
+// Only from inside the server's own container/machine (loopback) and with
+// the key derived from the data directory's secret, which only that machine
+// can read. Not under /api, so the bundled nginx never proxies it.
+
+function localOnly(req, res, next) {
+  const ip = req.socket.remoteAddress || '';
+  const loopback = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+  const key = String(req.headers['x-local-key'] || '');
+  if (!loopback || !key || key !== localKey(store.secret)) return res.status(404).end();
+  next();
+}
+
+function localKey(secret) {
+  return require('crypto').createHash('sha256').update('local:' + secret).digest('hex');
+}
+
+app.get('/local/users', localOnly, (req, res) => {
+  const users = store
+    .listUsers()
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .map((u) => ({ username: u.username, createdAt: u.createdAt, admin: isAdmin(u), save: u.save || null }));
+  res.json({ users });
+});
+
+app.post('/local/users/:name/password', localOnly, json, async (req, res) => {
+  const u = store.findUser(req.params.name);
+  if (!u) return res.status(404).json({ error: 'not_found' });
+  const password = typeof (req.body && req.body.password) === 'string' ? req.body.password : '';
+  if (password.length < 6 || password.length > 128) return res.status(400).json({ error: 'bad_password' });
+  store.setPassword(u.id, await auth.hashPassword(password));
+  console.log('[cli] new password set for %s', u.username);
+  res.json({ ok: true, username: u.username });
+});
+
 // Public rooms -----------------------------------------------------------
 
 const rooms = new Map();

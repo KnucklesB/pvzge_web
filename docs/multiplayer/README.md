@@ -86,6 +86,7 @@ PC as the guest) keeps the match running.
 | GET | `/api/auth/me`, `/api/auth/ticket` | profile; signed ticket proving the account to the host |
 | GET/PUT | `/api/save` | cloud save (`base` timestamp for conflict detection) |
 | GET | `/api/admin/users?q=` | admin (`ADMIN_USERS`): accounts and their save info |
+| POST | `/api/admin/users/:name/password` | admin: set a new password for a player |
 | GET/PUT | `/api/admin/users/:name/save` | admin: read / replace a player's cloud save (previous one backed up) |
 | GET | `/api/rooms` | public rooms (hosts heartbeat with `PUT /api/rooms/:code` + secret key) |
 | GET/POST | `/api/matches` | history; only the live room's host (key) can report a result |
