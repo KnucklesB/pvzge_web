@@ -43,6 +43,11 @@ const ADMINS = new Set(
 const IMPORT_ALL = (process.env.SAVE_IMPORT || '').toLowerCase() === 'all';
 
 const store = new Store(process.env.DATA_DIR || require('path').join(__dirname, 'data'));
+try {
+  store.checkWritable();
+} catch (e) {
+  console.error('[store] DATA_DIR %s is not writable: %s. Accounts and saves will fail until this is fixed.', store.dir, e.message);
+}
 const app = express();
 const server = http.createServer(app);
 
@@ -130,6 +135,14 @@ function requireUser(req, res, next) {
   next();
 }
 
+// Express 4 does not catch rejected promises: pass them to the error handler
+// (a crash here would take the signaling server down with it).
+function wrap(fn) {
+  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+}
+
+process.on('unhandledRejection', (e) => console.error('[error] unhandled rejection:', e));
+
 function isAdmin(user) {
   return !!user && ADMINS.has(user.username.toLowerCase());
 }
@@ -175,7 +188,7 @@ app.get('/api/health', (req, res) => {
 
 const USERNAME = /^[A-Za-z0-9][A-Za-z0-9_\-.]{2,19}$/;
 
-app.post('/api/auth/register', limit('auth', 10), json, async (req, res) => {
+app.post('/api/auth/register', limit('auth', 10), json, wrap(async (req, res) => {
   // Validate the raw value: never "fix" a username into a different one.
   const username = typeof (req.body && req.body.username) === 'string' ? req.body.username : '';
   const password = typeof (req.body && req.body.password) === 'string' ? req.body.password : '';
@@ -186,9 +199,9 @@ app.post('/api/auth/register', limit('auth', 10), json, async (req, res) => {
   const user = store.createUser(username, hash);
   const token = store.createSession(user.id);
   res.json({ token, user: userView(user) });
-});
+}));
 
-app.post('/api/auth/login', limit('auth', 10), json, async (req, res) => {
+app.post('/api/auth/login', limit('auth', 10), json, wrap(async (req, res) => {
   const username = typeof (req.body && req.body.username) === 'string' ? req.body.username : '';
   const password = typeof (req.body && req.body.password) === 'string' ? req.body.password.slice(0, 128) : '';
   const user = USERNAME.test(username) ? store.findUser(username) : null;
@@ -196,7 +209,7 @@ app.post('/api/auth/login', limit('auth', 10), json, async (req, res) => {
   if (!ok) return res.status(401).json({ error: 'bad_credentials' });
   const token = store.createSession(user.id);
   res.json({ token, user: userView(user) });
-});
+}));
 
 app.post('/api/auth/logout', requireUser, (req, res) => {
   store.deleteSession(req.token);
@@ -207,14 +220,14 @@ app.get('/api/auth/me', requireUser, (req, res) => {
   res.json({ user: userView(req.user) });
 });
 
-app.post('/api/auth/password', limit('auth', 10), requireUser, json, async (req, res) => {
+app.post('/api/auth/password', limit('auth', 10), requireUser, json, wrap(async (req, res) => {
   const current = typeof (req.body && req.body.current) === 'string' ? req.body.current.slice(0, 128) : '';
   const next = typeof (req.body && req.body.password) === 'string' ? req.body.password : '';
   if (next.length < 6 || next.length > 128) return res.status(400).json({ error: 'bad_password' });
   if (!(await auth.verifyPassword(current, req.user.password))) return res.status(401).json({ error: 'bad_credentials' });
   store.setPassword(req.user.id, await auth.hashPassword(next));
   res.json({ ok: true });
-});
+}));
 
 // Short-lived signed ticket proving "I am this account" to the other player's
 // host, so match results can be credited to the right accounts.
@@ -285,7 +298,7 @@ app.put('/api/admin/users/:name/save', limit('admin', 60), requireAdmin, bigJson
 });
 
 // Sets a new password for a player who forgot theirs (their sessions end).
-app.post('/api/admin/users/:name/password', limit('admin', 30), requireAdmin, json, async (req, res) => {
+app.post('/api/admin/users/:name/password', limit('admin', 30), requireAdmin, json, wrap(async (req, res) => {
   const u = targetUser(req, res);
   if (!u) return;
   const password = typeof (req.body && req.body.password) === 'string' ? req.body.password : '';
@@ -293,7 +306,7 @@ app.post('/api/admin/users/:name/password', limit('admin', 30), requireAdmin, js
   store.setPassword(u.id, await auth.hashPassword(password));
   console.log('[admin] %s set a new password for %s', req.user.username, u.username);
   res.json({ ok: true });
-});
+}));
 
 // Server maintenance (cli.js) -------------------------------------------
 // Only from inside the server's own container/machine (loopback) and with
@@ -320,7 +333,7 @@ app.get('/local/users', localOnly, (req, res) => {
   res.json({ users });
 });
 
-app.post('/local/users/:name/password', localOnly, json, async (req, res) => {
+app.post('/local/users/:name/password', localOnly, json, wrap(async (req, res) => {
   const u = store.findUser(req.params.name);
   if (!u) return res.status(404).json({ error: 'not_found' });
   const password = typeof (req.body && req.body.password) === 'string' ? req.body.password : '';
@@ -328,7 +341,7 @@ app.post('/local/users/:name/password', localOnly, json, async (req, res) => {
   store.setPassword(u.id, await auth.hashPassword(password));
   console.log('[cli] new password set for %s', u.username);
   res.json({ ok: true, username: u.username });
-});
+}));
 
 // Public rooms -----------------------------------------------------------
 
@@ -443,7 +456,7 @@ app.use('/api', (req, res) => res.status(404).json({ error: 'not_found' }));
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   const status = err.status || err.statusCode || 500;
-  if (status >= 500) console.error(err);
+  if (status >= 500) console.error('[error] %s %s:', req.method, req.originalUrl, err);
   res.status(status).json({ error: status === 413 ? 'too_large' : status >= 400 && status < 500 ? 'bad_request' : 'server_error' });
 });
 

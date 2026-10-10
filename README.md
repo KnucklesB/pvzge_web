@@ -68,6 +68,7 @@ Without configuration the game uses the public PeerJS cloud for signaling, so pl
 - Or run `server/` anywhere (`npm install && npm start`) and point the game at it with `server` in [`docs/multiplayer/mp-config.js`](docs/multiplayer/mp-config.js) or `?mp_server=https://your.host`. Set `ALLOWED_ORIGINS` to the site that serves the game.
 - Set `ADMIN_USERS` (comma separated usernames, e.g. `ADMIN_USERS=knuckles`) to choose who may import and edit saves; with Docker Compose/Portainer add it to the stack's environment variables and redeploy.
 - Forgotten passwords and the account list: on the server's container run `node cli.js users` (list accounts) or `node cli.js password <user> [new password]` (a random one is generated when omitted). With Docker Compose: `docker compose exec multiplayer node cli.js users`; in Portainer: *Containers → …-multiplayer-1 → Console → Connect* and type the command. Administrators can also set a new password for any player from **Players' saves**, and every player can change theirs in **Account**.
+- If logging in shows *"The account server is not responding (HTTP 502)"*, the `multiplayer` container is stopped or restarting: check its status and logs (Portainer: *Containers → …-multiplayer-1 → Logs*). The log names the cause, e.g. `DATA_DIR /data is not writable`.
 - Players behind very strict NATs may need a TURN server, which can be added to `iceServers` in the same config file.
 
 ## Using Docker

@@ -472,7 +472,7 @@
         el('div.mp-field', null, [el('label.mp-label', { text: t('password') }), p]),
         p2 ? el('div.mp-field', null, [el('label.mp-label', { text: t('password_repeat') }), p2]) : null,
         submit,
-        el('div.mp-error', { text: acc.error ? t(acc.error) : '' }),
+        el('div.mp-error', { text: acc.error ? t(acc.error, acc.errorVars) : '' }),
         !reg ? el('div.mp-note.mp-center', { text: t('forgot_password') }) : null,
       ]);
       var why = el('div.mp-panel.mp-account-why', null, [
@@ -558,7 +558,7 @@
           call('passwordMode', false);
         } }),
       ]),
-      el('div.mp-error', { text: acc.error ? t(acc.error) : '' }),
+      el('div.mp-error', { text: acc.error ? t(acc.error, acc.errorVars) : '' }),
     ]);
   }
 

@@ -461,6 +461,29 @@
     }
   };
 
+  // Turns an API failure into a message; unexpected server answers name
+  // the HTTP status so a broken server can be told from a wrong password.
+  function setAccountError(acc, e) {
+    var known = {
+      username_taken: 'err_username_taken',
+      bad_credentials: 'err_bad_credentials',
+      bad_username: 'err_bad_username',
+      bad_password: 'err_bad_password',
+      rate_limited: 'err_rate_limited',
+      offline: 'err_network',
+    }[e && e.code];
+    acc.errorVars = null;
+    if (known) acc.error = known;
+    else if (e && e.status >= 502 && e.status <= 504) {
+      acc.error = 'err_server_down';
+      acc.errorVars = { status: e.status };
+    } else if (e && e.status) {
+      acc.error = 'err_server';
+      acc.errorVars = { status: e.status, code: e.code && e.code !== 'server_error' ? ', ' + e.code : '' };
+    } else acc.error = 'err_generic';
+    if (e && !known) MP.warn('account request failed', e.status, e.code, e);
+  }
+
   App.accountSubmit = function (mode, username, password, password2) {
     var self = this;
     var acc = this.account;
@@ -479,14 +502,7 @@
           return MP.cloud.sync().catch(function () {});
         },
         function (e) {
-          acc.error = {
-            username_taken: 'err_username_taken',
-            bad_credentials: 'err_bad_credentials',
-            bad_username: 'err_bad_username',
-            bad_password: 'err_bad_password',
-            rate_limited: 'err_rate_limited',
-            offline: 'err_network',
-          }[e.code] || 'err_generic';
+          setAccountError(acc, e);
         },
       )
       .then(function () {
@@ -530,7 +546,7 @@
           acc.notice = 'password_changed';
         },
         function (e) {
-          acc.error = { bad_credentials: 'err_bad_credentials', bad_password: 'err_bad_password', rate_limited: 'err_rate_limited', offline: 'err_network' }[e.code] || 'err_generic';
+          setAccountError(acc, e);
         },
       )
       .then(function () {

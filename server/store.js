@@ -52,8 +52,21 @@ class Store {
     if (this._timer) return;
     this._timer = setTimeout(() => {
       this._timer = null;
-      this.flushSync();
+      try {
+        this.flushSync();
+      } catch (e) {
+        // Keep serving (the data stays in memory and is retried on the next
+        // change) instead of crashing the whole server.
+        console.error('[store] cannot write %s: %s (disk full or no permission on DATA_DIR?)', this.file, e.message);
+      }
     }, 500);
+  }
+
+  // Fails early, with a clear message, when DATA_DIR is not writable.
+  checkWritable() {
+    const probe = path.join(this.dir, '.write-test-' + process.pid);
+    fs.writeFileSync(probe, 'ok');
+    fs.unlinkSync(probe);
   }
 
   flushSync() {
