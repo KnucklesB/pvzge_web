@@ -36,6 +36,8 @@ bundle is not modified.
 | `mp-game.js` | Bridge to the game internals: modules, coordinates, actions, hooks. |
 | `mp-skin.js` | Cuts the game's own sprites/fonts at runtime for the HTML UI. |
 | `mp-ui.js` / `mp.css` | Lobby, HUD, overlays, stream viewer, results, chat, toasts. |
+| `mp-save.js` | Save files: export/import (several formats) and the save editor's progress shortcuts. |
+| `mp-levels.js` | Campaign level catalog per world (read from the game's world maps) for the Co-op level picker. |
 | `mp-cards.js` | Draws zombie seed packets (world background + portrait) from the game's DragonBones atlases for the lobby's zombie chooser. |
 | `mp-modes.js` | Options, arenas/zombie decks, generated levels, plant/zombie seats, `SoloRun`, `Match`. |
 | `mp-app.js` | Controller tying session, lobby, match and overlays together; main menu button. |
@@ -63,7 +65,11 @@ If a game update breaks multiplayer, check these first (`mp-game.js`):
 methods above, `Square` (`getLnC`, `judgeLIndex/judgeCIndex`, `lawnRec`),
 `dropping.prototype.characterUpdate`, `SandBoxZombieCards`, `zombies`,
 `LevelPlay.component.isSeedChooserMode`, `AllPlayerProperties.savePP` and the
-`PvZ2_PlayerProperties` / `PvZ2_Settings` localStorage keys.
+`PvZ2_PlayerProperties` / `PvZ2_Settings` localStorage keys. Co-op levels use `KeyListener.goToLevel` and the world
+map prefabs (`resources/worldmaps/*WORLDMAP`, see `mp-levels.js`); the save
+editor uses `PlayerProperties` enums (`LevelProgress`, `PlantObtainProgress`,
+`WorldMapSceneDisplayEnum`), `currentPlayer.forceLevel` and
+`Plants.plants.defaultPlantChooserOrder`.
 
 While a room is open the engine's auto-pause on hidden tabs
 (`cc.game.pauseByEngine`) is disabled and, when the browser throttles
@@ -79,6 +85,8 @@ PC as the guest) keeps the match running.
 | POST | `/api/auth/logout`, `/api/auth/password` | bearer token |
 | GET | `/api/auth/me`, `/api/auth/ticket` | profile; signed ticket proving the account to the host |
 | GET/PUT | `/api/save` | cloud save (`base` timestamp for conflict detection) |
+| GET | `/api/admin/users?q=` | admin (`ADMIN_USERS`): accounts and their save info |
+| GET/PUT | `/api/admin/users/:name/save` | admin: read / replace a player's cloud save (previous one backed up) |
 | GET | `/api/rooms` | public rooms (hosts heartbeat with `PUT /api/rooms/:code` + secret key) |
 | GET/POST | `/api/matches` | history; only the live room's host (key) can report a result |
 

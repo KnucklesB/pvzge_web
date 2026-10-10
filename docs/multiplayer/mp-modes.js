@@ -43,7 +43,7 @@
     zombieCooldown: { modes: ['versus'], values: [0.5, 0.75, 1, 1.5], def: 1, label: 'zombie_cooldown', fmt: 'mult' },
   };
 
-  MP.DEFAULT_SETTINGS = { mode: 'coop', stage: 'modern', hostSide: 'plants', quality: 'medium', public: true, zdeck: null };
+  MP.DEFAULT_SETTINGS = { mode: 'coop', stage: 'modern', hostSide: 'plants', quality: 'medium', public: true, zdeck: null, coopLevel: 'map' };
   Object.keys(MP.OPTIONS).forEach(function (k) {
     MP.DEFAULT_SETTINGS[k] = MP.OPTIONS[k].def;
   });
@@ -58,6 +58,7 @@
       if (MP.OPTIONS[k].values.indexOf(out[k]) < 0) out[k] = MP.OPTIONS[k].def;
     });
     out.zdeck = MP.validDeck(out.stage, out.zdeck, out.zombiePool);
+    if (out.coopLevel !== 'map' && !MP.findLevel(out.coopLevel)) out.coopLevel = 'map';
     return out;
   };
 
@@ -627,12 +628,15 @@
     this.warned30 = false;
     this.sceneReady = false;
     this.sawIdle = false;
+    this.coopLevel = this.mode === 'coop' ? MP.findLevel(this.settings.coopLevel) : null;
     var self = this;
     this._onLocalPlant = function () {
       self.stats.planted[0]++;
     };
     this._onScene = function (name) {
-      if (self.mode === 'coop' || self.phase === 'over') return;
+      // Co-op on the game map: the host roams freely. A picked level ends
+      // (back to the room) when the game leaves it.
+      if ((self.mode === 'coop' && !self.coopLevel) || self.phase === 'over') return;
       if (name === 'inGameScene') {
         // A level restarted from the pause menu starts the match over.
         if (self.phase === 'playing' && self.mode === 'versus') self.restartLevel();
@@ -672,6 +676,7 @@
       return G.startCustomLevel(MP.buildLevel.versus(s));
     }
     this.phase = 'playing';
+    if (this.coopLevel) return G.goToLevel(this.coopLevel.level.ids);
     return G.goToWorldMap();
   };
 

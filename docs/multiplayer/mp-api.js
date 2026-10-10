@@ -147,6 +147,36 @@
 
   /* ---------------------------------------------------------------- rooms */
 
+  /* administration (accounts listed in the server's ADMIN_USERS) */
+
+  api.isAdmin = function () {
+    var u = api.user();
+    return !!(u && u.admin);
+  };
+
+  api.can = function (what) {
+    var u = api.user();
+    return !!(u && u.can && u.can[what]);
+  };
+
+  api.adminUsers = function (q) {
+    return api.request('GET', '/admin/users?q=' + encodeURIComponent(q || '')).then(function (r) {
+      return r.users || [];
+    });
+  };
+
+  api.adminGetSave = function (name) {
+    return api.request('GET', '/admin/users/' + encodeURIComponent(name) + '/save').then(function (r) {
+      return r.save;
+    });
+  };
+
+  api.adminPutSave = function (name, data) {
+    return api.request('PUT', '/admin/users/' + encodeURIComponent(name) + '/save', { data: data }, { timeout: 60000 }).then(function (r) {
+      return r.save;
+    });
+  };
+
   api.rooms = function () {
     return api.request('GET', '/rooms', undefined, { anonymous: true }).then(function (r) {
       return r.rooms || [];

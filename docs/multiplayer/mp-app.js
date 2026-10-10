@@ -68,8 +68,8 @@
     var s = this.session;
     if (!s) {
       return {
-        view: 'home',
-        tab: this.tab,
+        view: this.accountOnly ? 'account' : 'home',
+        tab: this.accountOnly ? 'account' : this.tab,
         name: playerName(),
         nameLocked: !!api.user(),
         code: this.pendingJoinCode || MP.store.get('lastCode', ''),
@@ -80,6 +80,8 @@
         history: this.history,
         account: this.account,
         cloud: { status: MP.cloud.status, lastSync: MP.cloud.lastSync, conflict: !!MP.cloud.conflict },
+        saves: { canImport: api.can('importSave'), canEdit: api.can('editSave'), profiles: MP.saves.profileNames(MP.saves.readLocal()) },
+        adminList: api.isAdmin() ? this.adminList : null,
       };
     }
     if (!s.code || (this.role === 'guest' && !s.connected)) {
@@ -106,6 +108,7 @@
       ready: this.guestReady,
       canStart: this.role === 'host' && guestConnected && this.guestReady,
       canEditDeck: this.settings.mode === 'versus' && this.mySide() === 'zombies',
+      mapLocked: this.role === 'host' && !G.mapUnlocked(),
       online: api.available(),
       status: status,
       error: this.lobbyError,
@@ -170,9 +173,15 @@
 
   App.onTabShown = function () {
     if (this.session || !UI.isLobbyOpen()) return;
-    if (this.tab === 'rooms') this.loadRooms();
+    var self = this;
+    if (this.accountOnly || this.tab === 'account') {
+      if (!api.loggedIn()) return;
+      api.refreshMe().then(function () {
+        self.rebuildLobby();
+        if (api.isAdmin()) self.adminSearch(self.adminList.q);
+      }, function () {});
+    } else if (this.tab === 'rooms') this.loadRooms();
     else if (this.tab === 'history') this.loadHistory();
-    else if (this.tab === 'account' && api.loggedIn()) api.refreshMe().then(this.rebuildLobby.bind(this), function () {});
   };
 
   App.create = function (name) {
@@ -186,6 +195,8 @@
     this.phase = 'lobby';
     this.guestReady = false;
     this.roomKey = MP.util.randomCode(24);
+    // A profile still in the tutorial has nothing to pick on the map.
+    if (!G.mapUnlocked() && this.settings.coopLevel === 'map') this.settings.coopLevel = 'egypt:1';
     var s = (this.session = new MP.Session());
     G.setKeepAlive(true);
     bindSession(s);
@@ -367,7 +378,17 @@
   };
 
   App.closeLobby = function () {
+    this.accountOnly = false;
+    UI.closeSaveEditor();
     UI.closeLobby();
+  };
+
+  // The account window on its own (main menu), for solo players.
+  App.openAccount = function () {
+    if (!G.ready || G.sceneName() !== 'mainScene') return;
+    if (this.session) return this.openLobby();
+    this.accountOnly = true;
+    this.openLobby();
   };
 
   /* ===================================================== online features */
@@ -511,6 +532,130 @@
     });
   };
 
+  /* ========================================================== save files */
+
+  function apiErrorKey(e) {
+    return { forbidden: 'err_forbidden', offline: 'err_network', rate_limited: 'err_rate_limited', save_too_large: 'save_bad', bad_save: 'save_bad' }[e && e.code] || 'err_generic';
+  }
+
+  App.exportSave = function () {
+    var blob = MP.saves.readLocal();
+    if (!blob.players) return UI.toast(t('editor_no_profiles'), 'warn');
+    MP.saves.download(blob, api.user() ? api.user().username : '');
+    UI.toast(t('save_exported'), 'good');
+  };
+
+  function applyLocalSave(blob) {
+    if (!MP.saves.canApply()) {
+      UI.toast(t('save_only_menu'), 'warn');
+      return true; // keep the editor open
+    }
+    MP.saves.applyLocal(blob);
+    UI.toast(t('save_applied'), 'good', 5000);
+    return false;
+  }
+
+  App.importSave = function () {
+    if (!api.can('importSave')) return UI.toast(t('err_forbidden'), 'warn');
+    var picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = '.json,application/json,text/plain';
+    picker.onchange = function () {
+      var file = picker.files && picker.files[0];
+      if (!file) return;
+      file.text().then(function (text) {
+        var blob;
+        try {
+          blob = MP.saves.parse(text);
+        } catch (e) {
+          return UI.toast(t('save_bad'), 'warn');
+        }
+        if (!window.confirm(t('save_import_confirm', { name: file.name }))) return;
+        applyLocalSave(blob);
+      });
+    };
+    picker.click();
+  };
+
+  App.editSave = function () {
+    if (!api.can('editSave')) return UI.toast(t('err_forbidden'), 'warn');
+    UI.openSaveEditor({ source: t('editor_source_local'), blob: MP.saves.readLocal(), onSave: applyLocalSave });
+  };
+
+  App.adminList = { q: '', list: [], loading: false, error: null };
+
+  App.adminSearch = function (q) {
+    var self = this;
+    var a = this.adminList;
+    a.q = q || '';
+    a.loading = true;
+    a.error = null;
+    var mine = (this._adminReq = (this._adminReq || 0) + 1);
+    api.adminUsers(a.q).then(
+      function (list) {
+        if (mine !== self._adminReq) return;
+        a.list = list;
+        a.loading = false;
+        self.refreshLobby();
+      },
+      function (e) {
+        if (mine !== self._adminReq) return;
+        a.loading = false;
+        a.error = apiErrorKey(e);
+        self.refreshLobby();
+      },
+    );
+  };
+
+  function loadUserSave(name) {
+    return api.adminGetSave(name).then(function (save) {
+      if (!save || !save.data) throw { code: 'bad_save' };
+      return MP.saves.parse(save.data);
+    });
+  }
+
+  App.adminEdit = function (name) {
+    var self = this;
+    loadUserSave(name).then(
+      function (blob) {
+        UI.openSaveEditor({
+          source: t('editor_source_user', { name: name }),
+          blob: blob,
+          saveLabel: t('editor_save_user'),
+          onSave: function (b) {
+            return api.adminPutSave(name, JSON.stringify({ v: 1, players: b.players, settings: b.settings })).then(
+              function () {
+                UI.toast(t('editor_saved_user', { name: name }), 'good', 5000);
+                self.adminSearch(self.adminList.q);
+                // Our own account edited: bring this browser up to date.
+                if (api.user() && api.user().username.toLowerCase() === name.toLowerCase()) MP.cloud.sync().catch(function () {});
+                return false;
+              },
+              function (e) {
+                UI.toast(t(apiErrorKey(e)), 'warn');
+                return true;
+              },
+            );
+          },
+        });
+      },
+      function (e) {
+        UI.toast(t(apiErrorKey(e)), 'warn');
+      },
+    );
+  };
+
+  App.adminExport = function (name) {
+    loadUserSave(name).then(
+      function (blob) {
+        MP.saves.download(blob, name);
+      },
+      function (e) {
+        UI.toast(t(apiErrorKey(e)), 'warn');
+      },
+    );
+  };
+
   /* ============================================================ session */
 
   function bindSession(s) {
@@ -602,8 +747,9 @@
     this.updateBadge();
     this.publishRoom();
     if (this.settings.mode === 'coop') {
+      var hint = MP.findLevel(this.settings.coopLevel) ? t('coop_hint_level', { level: UI.levelLabel(this.settings.coopLevel) }) : t('coop_hint');
       setTimeout(function () {
-        UI.toast(t('coop_hint'), 'good', 4500);
+        UI.toast(hint, 'good', 4500);
       }, 1200);
     }
   };
@@ -1235,9 +1381,27 @@
     }
   }
 
+  // Account chip next to the profile name on the main menu.
+  App.renderMenuAccount = function () {
+    var show = G.ready && !this.session && !UI.isLobbyOpen() && G.sceneName() === 'mainScene';
+    var node = show && G.cc.find('Canvas/PlayerSelectorButton');
+    var r = node && G.nodeRectNorm(node);
+    var c = r && G.canvas.getBoundingClientRect();
+    if (!c) return UI.renderMenuAccount(null);
+    var u = api.user();
+    UI.renderMenuAccount({
+      left: c.left + (r.x + r.w) * c.width + c.width * 0.012,
+      top: c.top + r.y * c.height,
+      height: r.h * c.height,
+      text: u ? u.username : t('account_button'),
+      status: u ? MP.cloud.status : 'none',
+    });
+  };
+
   function loop() {
     try {
       App.renderOverlays();
+      App.renderMenuAccount();
     } catch (e) {
       MP.warn('overlay error', e);
     }
@@ -1328,6 +1492,27 @@
       },
       lang: function (code) {
         App.setLang(code);
+      },
+      exportSave: function () {
+        App.exportSave();
+      },
+      importSave: function () {
+        App.importSave();
+      },
+      editSave: function () {
+        App.editSave();
+      },
+      adminSearch: function (q) {
+        App.adminSearch(q);
+      },
+      adminEdit: function (name) {
+        App.adminEdit(name);
+      },
+      adminExport: function (name) {
+        App.adminExport(name);
+      },
+      openAccount: function () {
+        App.openAccount();
       },
       tab: function (tab) {
         App.setTab(tab);
@@ -1421,7 +1606,16 @@
         UI.toast(t('cloud_reloading'), 'good', 5000);
       });
       MP.cloud.on('status', function () {
-        if (App.tab === 'account') App.rebuildLobby();
+        if (App.tab === 'account' || App.accountOnly) App.rebuildLobby();
+      });
+      // Logged in/out (not a profile refresh): load the admin list if needed.
+      var lastUser = api.user() && api.user().id;
+      api.on('auth', function (user) {
+        var id = user && user.id;
+        if (id === lastUser) return;
+        lastUser = id;
+        App.adminList.list = [];
+        if (api.isAdmin() && UI.isLobbyOpen() && (App.accountOnly || App.tab === 'account')) App.adminSearch('');
       });
       MP.cloud.init();
       requestAnimationFrame(loop);

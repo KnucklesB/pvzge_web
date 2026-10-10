@@ -101,6 +101,10 @@ class Store {
     return { id: u.id, username: u.username, createdAt: u.createdAt, stats: u.stats, save: this.saveMeta(u.id) };
   }
 
+  listUsers() {
+    return Object.values(this.db.users);
+  }
+
   /* sessions */
 
   createSession(userId) {
@@ -150,6 +154,13 @@ class Store {
     } catch (e) {
       return null;
     }
+  }
+
+  backupSave(userId) {
+    const file = this.saveFile(userId);
+    try {
+      fs.copyFileSync(file, file.replace(/\.json$/, '.bak.json'));
+    } catch (e) {}
   }
 
   writeSave(userId, data, device) {

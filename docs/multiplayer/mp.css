@@ -1800,3 +1800,183 @@ button.mp-zpacket:hover:not(:disabled) {
   transition: left 0.4s ease;
   filter: drop-shadow(0 0 5px rgba(255, 220, 60, 0.9));
 }
+
+/* ------------------------------------------------ co-op level picker */
+.mp-warn-box {
+  margin: 6px 0;
+  padding: 10px 12px;
+  border: 3px solid #6b3a00;
+  border-radius: 12px;
+  background: linear-gradient(#ffcf4a, #f0a21c);
+  color: #3a1d00;
+  font-size: 16px;
+  line-height: 1.3;
+}
+.mp-coop-selected {
+  align-self: flex-start;
+  padding: 6px 14px 8px;
+  border: 3px solid #163f07;
+  border-radius: 12px;
+  background: linear-gradient(#5fd12e, #2b8e14);
+  font-size: 22px;
+  text-shadow: var(--mp-outline);
+}
+.mp-seg.mp-worlds button {
+  height: 32px;
+  padding: 0 10px 2px;
+  font-size: 15px;
+}
+.mp-level-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  gap: 6px;
+}
+.mp-level {
+  height: 40px;
+  border: 3px solid #2b1608;
+  border-radius: 10px;
+  background: #8a5a31;
+  color: #fff;
+  font-family: var(--mp-font);
+  font-size: 17px;
+  text-shadow: var(--mp-outline);
+  cursor: pointer;
+  position: relative;
+}
+.mp-level:hover {
+  background: #a26d3e;
+}
+.mp-level.mp-level-k1 {
+  background: #6d4b8f;
+}
+.mp-level.mp-level-k3 {
+  background: #a3322a;
+}
+.mp-level.mp-level-k4 {
+  background: #2f7a5a;
+  font-size: 14px;
+}
+.mp-level.mp-on {
+  background: linear-gradient(#5fd12e, #2b8e14);
+  border-color: var(--mp-gold);
+  box-shadow: 0 0 8px rgba(255, 216, 74, 0.8);
+}
+
+/* ------------------------------------------------ account & save tools */
+.mp-account-scroll {
+  flex: 1;
+  min-height: 0;
+  max-height: calc(94vh - 190px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-right: 4px;
+}
+.mp-save-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mp-admin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.mp-admin-list .mp-list-title .mp-player-tag {
+  margin-left: 8px;
+}
+.mp-save-editor {
+  width: min(860px, 94vw);
+}
+.mp-editor-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  flex: 1;
+  max-height: calc(94vh - 200px);
+  padding-right: 4px;
+}
+.mp-editor-nums {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.mp-editor-nums .mp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mp-raw {
+  width: 100%;
+  height: 220px;
+  resize: vertical;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.35;
+  text-shadow: none;
+  white-space: pre;
+  user-select: text;
+  -webkit-user-select: text;
+}
+#pvzmp-root textarea {
+  pointer-events: auto;
+}
+
+/* main menu account chip */
+.mp-menu-account {
+  position: absolute;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  padding: 0 0.8em 0 0.3em;
+  border: 3px solid #2b1608;
+  border-radius: 14px;
+  background: linear-gradient(#c8874b, #8a5a31);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.25);
+  color: #fff;
+  font-family: var(--mp-font);
+  text-shadow: var(--mp-outline);
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform 0.08s, filter 0.12s;
+}
+.mp-menu-account:hover {
+  filter: brightness(1.1);
+}
+.mp-menu-account:active {
+  transform: translateY(2px);
+}
+.mp-menu-account-icon {
+  height: 78%;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  border: 2px solid #2b1608;
+  background: #fff8e6 var(--mp-img-PlayerIcon) center / 70% no-repeat;
+}
+.mp-menu-account-dot {
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 50%;
+  border: 2px solid #000;
+  display: none;
+}
+.mp-menu-account.mp-cloud-synced .mp-menu-account-dot,
+.mp-menu-account.mp-cloud-idle .mp-menu-account-dot {
+  display: inline-block;
+  background: var(--mp-green);
+}
+.mp-menu-account.mp-cloud-syncing .mp-menu-account-dot {
+  display: inline-block;
+  background: var(--mp-gold);
+}
+.mp-menu-account.mp-cloud-error .mp-menu-account-dot,
+.mp-menu-account.mp-cloud-offline .mp-menu-account-dot,
+.mp-menu-account.mp-cloud-conflict .mp-menu-account-dot {
+  display: inline-block;
+  background: var(--mp-red);
+}

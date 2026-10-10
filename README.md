@@ -39,7 +39,7 @@ Click **Multiplayer** on the main menu to play with a friend over the internet. 
 
 | Mode | How it plays |
 | --- | --- |
-| **Co-op** | Shared lawn: the host plays any level of the game (campaign, endless zones, minigames). Both players share sun, seed packets and plant food, each with their own cursor, and both can pick seeds. |
+| **Co-op** | Shared lawn: pick any campaign level of any world in the room (556 levels, bosses and plant quests included), even if the host's profile hasn't unlocked it, or let the host roam the game's own map. Both players share sun, seed packets and plant food, each with their own cursor, and both can pick seeds. |
 | **Versus** | Shared lawn: the plant player picks plants in the game's seed chooser; the zombie player builds a 6-zombie deck in the lobby with a seed chooser that shows the game's own zombie packets (every almanac zombie of every world, or only the arena's zombies) and spends brains to send zombies down any lane. Plants win by holding until the timer runs out; zombies win by reaching the house. |
 | **Survival** | One lawn per player: both run the same generated level with ever-growing waves on their own screen and watch each other's lawn live (picture-in-picture, can be enlarged). Whoever lasts more waves wins. |
 
@@ -49,9 +49,11 @@ After a match both players stay in the room: rematch, change settings or leave. 
 
 ### Accounts, cloud saves, rooms and history
 
-The game itself keeps its progress in the browser (`localStorage`, per profile name). With a multiplayer server (see below) players can sign up and log in from the lobby's **Account** tab:
+The game itself keeps its progress in the browser (`localStorage`, per profile name). With a multiplayer server (see below) players can sign up and log in from the **Account** button next to the profile name on the main menu (or the lobby's **Account** tab):
 
-- every game profile in the browser is uploaded to the account and kept in sync automatically; logging in on another browser downloads it (if both changed, the player chooses which to keep);
+- every game profile in the browser, including single-player progress, is uploaded to the account and kept in sync automatically; logging in on another browser downloads it (if both changed, the player chooses which to keep);
+- **Export save** downloads all profiles as a `.json` file;
+- **Import save** and the **save editor** (coins, gems, world keys, tickets, sprouts, "finish tutorial", "unlock every world", "complete every level", "unlock every plant" and the raw profile JSON) are reserved for the accounts listed in the server's `ADMIN_USERS`. Administrators also get a **Players' saves** list to download or edit any player's cloud save (the previous one is kept as `<id>.bak.json`); the player receives it on their next sync. `SAVE_IMPORT=all` lets every logged-in player import files;
 - public rooms are listed in the **Rooms** tab, finished Versus/Survival matches in the **Matches** tab, and accounts get win/best-wave stats.
 
 ### How it works
@@ -64,6 +66,7 @@ Without configuration the game uses the public PeerJS cloud for signaling, so pl
 
 - `docker compose up -d --build --remove-orphans` runs the game and the server together on http://localhost:8080 (accounts and saves are kept in the `multiplayer-data` volume). In Portainer, use this repository's `docker-compose.yml` for the stack.
 - Or run `server/` anywhere (`npm install && npm start`) and point the game at it with `server` in [`docs/multiplayer/mp-config.js`](docs/multiplayer/mp-config.js) or `?mp_server=https://your.host`. Set `ALLOWED_ORIGINS` to the site that serves the game.
+- Set `ADMIN_USERS` (comma separated usernames, e.g. `ADMIN_USERS=knuckles`) to choose who may import and edit saves; with Docker Compose/Portainer add it to the stack's environment variables and redeploy.
 - Players behind very strict NATs may need a TURN server, which can be added to `iceServers` in the same config file.
 
 ## Using Docker

@@ -747,6 +747,21 @@
     return G.KL().GoToWorldmap();
   };
 
+  // A campaign level by id (random pick when several, like the map does).
+  G.goToLevel = function (ids) {
+    return G.KL().goToLevel(ids, [], true, false);
+  };
+
+  // False while the profile is still forced through the tutorial (the
+  // main menu's Play goes to "forceLevel" instead of the map).
+  G.mapUnlocked = function () {
+    try {
+      return !G.m.PlayerProperties.AllPlayerProperties.currentPlayer.forceLevel;
+    } catch (e) {
+      return true;
+    }
+  };
+
   G.startCustomLevel = function (objects) {
     var LP = G.LP();
     LP.levelData = objects;

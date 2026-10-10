@@ -17,6 +17,12 @@ services:
     build: ./server
     environment:
       PROXIED: "true"
+      # Accounts allowed to edit/import saves (theirs and every player's),
+      # comma separated, e.g. ADMIN_USERS=knuckles. Set it in the stack's
+      # environment variables (Portainer) or in a .env file next to this one.
+      ADMIN_USERS: "${ADMIN_USERS:-}"
+      # "all" lets every logged-in player import save files (default: admins).
+      SAVE_IMPORT: "${SAVE_IMPORT:-admins}"
     volumes:
       # Accounts, cloud saves and match history live here: keep this volume.
       - multiplayer-data:/data

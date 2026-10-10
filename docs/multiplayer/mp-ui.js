@@ -223,7 +223,7 @@
     var sameView = lobbyState && lobbyState.view === state.view && lobbyState.tab === state.tab;
     var snap = sameView ? snapshot() : null;
     lobbyState = state;
-    var win = el('div.mp-window.mp-interactive' + (state.view === 'home' ? '.mp-home-window' : ''));
+    var win = el('div.mp-window.mp-interactive' + (state.view === 'home' || state.view === 'account' ? '.mp-home-window' : ''));
     var close = el('button.mp-close', { title: t('close'), 'aria-label': t('close'), onclick: function () {
       call('closeLobby');
     } });
@@ -241,8 +241,12 @@
       );
     });
     win.appendChild(langs);
-    win.appendChild(el('div.mp-window-title', { text: t('lobby_title') }));
-    if (state.view === 'home') renderHome(win, state);
+    win.appendChild(el('div.mp-window-title', { text: state.view === 'account' ? t('account_title') : t('lobby_title') }));
+    if (state.view === 'account') {
+      var body = el('div.mp-tab-body');
+      win.appendChild(body);
+      renderAccountTab(body, state);
+    } else if (state.view === 'home') renderHome(win, state);
     else if (state.view === 'busy') renderBusy(win, state);
     else renderRoom(win, state);
     if (mounted && lobbyBackdrop.parentNode === layers.modal) {
@@ -427,8 +431,14 @@
     body.appendChild(el('div.mp-panel.mp-list-panel', null, [head, list]));
   }
 
-  function renderAccountTab(body, state) {
-    if (!state.online) return offlineNotice(body);
+  function renderAccountTab(outer, state) {
+    var body = el('div.mp-account-scroll.mp-scroll', { 'data-scroll': 'account' });
+    outer.appendChild(body);
+    if (!state.online) {
+      offlineNotice(body);
+      renderSaveTools(body, state);
+      return;
+    }
     var acc = state.account;
     var user = state.user;
     if (!user) {
@@ -469,6 +479,7 @@
         el('ul.mp-bullets', null, [el('li', { text: t('account_why_1') }), el('li', { text: t('account_why_2') }), el('li', { text: t('account_why_3') })]),
       ]);
       body.appendChild(el('div.mp-account', null, [form, why]));
+      renderSaveTools(body, state);
       setTimeout(function () {
         if (!document.activeElement || document.activeElement === document.body) u.focus();
       }, 50);
@@ -479,7 +490,12 @@
       return el('div.mp-stat', null, [el('div.mp-stat-v', { text: String(value || 0) }), el('div.mp-stat-l', { text: label })]);
     };
     var profile = el('div.mp-panel', null, [
-      el('div.mp-account-name', null, [el('div.mp-avatar'), el('span', { text: user.username }), el('span.mp-verified', { text: '✓' })]),
+      el('div.mp-account-name', null, [
+        el('div.mp-avatar'),
+        el('span', { text: user.username }),
+        el('span.mp-verified', { text: '✓' }),
+        user.admin ? el('span.mp-player-tag.mp-host', { text: t('admin_badge') }) : null,
+      ]),
       el('div.mp-note', { text: t('member_since', { date: new Date(user.createdAt).toLocaleDateString() }) }),
       el('div.mp-stats-grid', null, [stat(t('stat_matches'), st.matches), stat(t('stat_wins'), st.wins), stat(t('stat_versus_wins'), st.versusWins), stat(t('stat_best_wave'), st.bestWave)]),
       el('div.mp-account-actions', null, [el('button.mp-btn.mp-small.mp-red', { text: t('logout'), onclick: function () {
@@ -503,7 +519,238 @@
     ]);
     body.appendChild(el('div.mp-account', null, [profile, cloud]));
     if (acc.notice) body.appendChild(el('div.mp-status', { text: t(acc.notice) }));
+    renderSaveTools(body, state);
+    if (user.admin) renderAdminPanel(body, state);
   }
+
+  /* -------------------------------------------------------- save tools */
+
+  function renderSaveTools(body, state) {
+    var sv = state.saves || {};
+    var actions = el('div.mp-account-actions', null, [
+      el('button.mp-btn.mp-small.mp-green', { text: t('save_export'), onclick: function () {
+        call('exportSave');
+      } }),
+      sv.canImport
+        ? el('button.mp-btn.mp-small.mp-brown', { text: t('save_import'), onclick: function () {
+            call('importSave');
+          } })
+        : null,
+      sv.canEdit
+        ? el('button.mp-btn.mp-small.mp-blue', { text: t('save_edit'), onclick: function () {
+            call('editSave');
+          } })
+        : null,
+    ]);
+    var profiles = (sv.profiles || []).join(', ');
+    body.appendChild(
+      el('div.mp-panel.mp-save-panel', null, [
+        el('div.mp-panel-title', { text: t('save_title') }),
+        el('div.mp-note', { text: t('save_desc') + (profiles ? ' (' + profiles + ')' : '') }),
+        actions,
+        !sv.canEdit ? el('div.mp-note', { text: t('save_admin_only') }) : null,
+      ]),
+    );
+  }
+
+  function renderAdminPanel(body, state) {
+    var a = state.adminList || { q: '', list: [], loading: false };
+    var q = input(null, { 'data-k': 'admin-q', maxlength: 20, placeholder: t('admin_search'), value: a.q || '' });
+    var timer = null;
+    q.addEventListener('input', function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        call('adminSearch', q.value.trim());
+      }, 350);
+    });
+    var list = el('div.mp-list.mp-admin-list');
+    if (a.error) list.appendChild(el('div.mp-error', { text: t(a.error) }));
+    else if (!a.list.length) list.appendChild(el('div.mp-note.mp-center', { text: a.loading ? t('loading') : t('admin_empty') }));
+    a.list.forEach(function (u) {
+      list.appendChild(
+        el('div.mp-list-item', null, [
+          el('div.mp-list-main', null, [
+            el('div.mp-list-title', null, [u.username, u.admin ? el('span.mp-player-tag.mp-host', { text: t('admin_badge') }) : null]),
+            el('div.mp-list-sub', { text: u.save ? timeAgo(u.save.updatedAt) + ' • ' + Math.max(1, Math.round(u.save.size / 1024)) + ' KB' : t('admin_no_save') }),
+          ]),
+          el('button.mp-btn.mp-small.mp-brown', { text: t('admin_export'), disabled: !u.save, onclick: function () {
+            call('adminExport', u.username);
+          } }),
+          el('button.mp-btn.mp-small.mp-blue', { text: t('admin_edit'), disabled: !u.save, onclick: function () {
+            call('adminEdit', u.username);
+          } }),
+        ]),
+      );
+    });
+    body.appendChild(el('div.mp-panel.mp-save-panel', null, [el('div.mp-panel-title', { text: t('admin_title') }), q, list]));
+  }
+
+  /* ------------------------------------------------ main menu account */
+
+  var menuChip = null;
+  var menuKey = '';
+  UI.renderMenuAccount = function (info) {
+    if (!root) return;
+    if (!info) {
+      if (menuChip) menuChip.remove();
+      menuChip = null;
+      menuKey = '';
+      return;
+    }
+    if (!menuChip) {
+      menuChip = el('button.mp-menu-account', { onclick: function () {
+        call('openAccount');
+      } }, [el('span.mp-menu-account-icon'), el('span.mp-menu-account-text'), el('span.mp-menu-account-dot')]);
+      root.insertBefore(menuChip, layers.toasts);
+    }
+    var key = [Math.round(info.left), Math.round(info.top), Math.round(info.height), info.text, info.status, MP.lang].join('|');
+    if (key === menuKey) return;
+    menuKey = key;
+    var st = menuChip.style;
+    st.left = info.left + 'px';
+    st.top = info.top + 'px';
+    st.height = info.height + 'px';
+    st.fontSize = Math.max(12, info.height * 0.42) + 'px';
+    menuChip.querySelector('.mp-menu-account-text').textContent = info.text;
+    menuChip.className = 'mp-menu-account mp-cloud-' + info.status;
+    menuChip.title = t('account_title');
+  };
+
+  /* --------------------------------------------------------- save editor */
+
+  // opts: { title, source, blob: {players, settings}, saveLabel, onSave(blob) }
+  UI.openSaveEditor = function (opts) {
+    var profiles;
+    try {
+      profiles = JSON.parse(opts.blob.players);
+    } catch (e) {
+      profiles = [];
+    }
+    if (!Array.isArray(profiles) || !profiles.length) {
+      UI.toast(t('editor_no_profiles'), 'warn');
+      return;
+    }
+    UI.closeSaveEditor();
+    var idx = 0;
+    var win = el('div.mp-window.mp-zchooser.mp-save-editor.mp-interactive');
+    var bd = el('div.mp-backdrop.mp-dialog-layer', null, win);
+    ['mousedown', 'wheel', 'keydown'].forEach(function (ev) {
+      bd.addEventListener(ev, function (e) {
+        e.stopPropagation();
+      });
+    });
+    var rawError = el('div.mp-error');
+    var raw = el('textarea.mp-input.mp-raw', { spellcheck: 'false' });
+    MP.util.shieldInput(raw);
+    var tabs = el('div.mp-seg');
+    var nums = el('div.mp-editor-nums');
+
+    function commitRaw() {
+      try {
+        var o = JSON.parse(raw.value);
+        if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error('{ }');
+        profiles[idx] = o;
+        rawError.textContent = '';
+        return true;
+      } catch (e) {
+        rawError.textContent = t('editor_raw_bad', { msg: e.message });
+        return false;
+      }
+    }
+
+    function render() {
+      var p = profiles[idx];
+      tabs.innerHTML = '';
+      profiles.forEach(function (pr, i) {
+        tabs.appendChild(
+          el('button' + (i === idx ? '.mp-on' : ''), {
+            text: pr.name || '#' + (i + 1),
+            onclick: function () {
+              if (i === idx || !commitRaw()) return;
+              idx = i;
+              render();
+            },
+          }),
+        );
+      });
+      nums.innerHTML = '';
+      MP.saves.NUMBERS.forEach(function (n) {
+        var inp = el('input.mp-input', { type: 'number', min: 0, max: n.max, value: String(Number(p[n.key]) || 0) });
+        MP.util.shieldInput(inp);
+        inp.addEventListener('input', function () {
+          var v = Math.max(0, Math.min(n.max, Math.floor(Number(inp.value) || 0)));
+          p[n.key] = v;
+          raw.value = JSON.stringify(p, null, 1);
+        });
+        nums.appendChild(el('label.mp-field', null, [el('span.mp-label', { text: t(n.label) }), inp]));
+      });
+      raw.value = JSON.stringify(p, null, 1);
+      rawError.textContent = '';
+    }
+
+    var quick = el('div.mp-account-actions');
+    Object.keys(MP.saves.ACTIONS).forEach(function (k) {
+      quick.appendChild(
+        el('button.mp-btn.mp-small.mp-brown', {
+          text: t(MP.saves.ACTION_LABELS[k]),
+          onclick: function () {
+            if (!commitRaw()) return;
+            MP.saves.ACTIONS[k](profiles[idx]);
+            render();
+            UI.toast(t('editor_done', { what: t(MP.saves.ACTION_LABELS[k]) }), 'good', 2500);
+          },
+        }),
+      );
+    });
+    raw.addEventListener('change', commitRaw);
+
+    var saveBtn = el('button.mp-btn.mp-green.mp-big', {
+      text: opts.saveLabel || t('editor_save'),
+      onclick: function () {
+        if (!commitRaw()) return;
+        saveBtn.disabled = true;
+        Promise.resolve(opts.onSave({ players: JSON.stringify(profiles), settings: opts.blob.settings || null })).then(
+          function (keepOpen) {
+            if (!keepOpen) UI.closeSaveEditor();
+            else saveBtn.disabled = false;
+          },
+          function () {
+            saveBtn.disabled = false;
+          },
+        );
+      },
+    });
+
+    win.appendChild(el('button.mp-close', { title: t('close'), onclick: function () {
+      UI.closeSaveEditor();
+    } }));
+    win.appendChild(el('div.mp-window-title', { text: t('editor_title') }));
+    win.appendChild(el('div.mp-window-sub', { text: opts.source || '' }));
+    var body = el('div.mp-editor-body.mp-scroll', null, [
+      el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('editor_profile') }), tabs]),
+      el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('editor_values') }), nums]),
+      el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('editor_quick') }), quick]),
+      el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('editor_raw') }), raw, rawError]),
+    ]);
+    win.appendChild(body);
+    win.appendChild(
+      el('div.mp-results-actions', null, [
+        el('button.mp-btn.mp-brown', { text: t('editor_cancel'), onclick: function () {
+          UI.closeSaveEditor();
+        } }),
+        saveBtn,
+      ]),
+    );
+    root.appendChild(bd);
+    editorNode = bd;
+    render();
+  };
+
+  var editorNode = null;
+  UI.closeSaveEditor = function () {
+    if (editorNode) editorNode.remove();
+    editorNode = null;
+  };
 
   function renderBusy(win, state) {
     win.appendChild(
@@ -650,12 +897,6 @@
     UI.updateZombieChooser(opts.deck);
   };
 
-  function worldLabel(w) {
-    var key = 'world_' + w;
-    var s = t(key);
-    return s === key ? w : s;
-  }
-
   function renderChooserTabs() {
     var c = chooser;
     var worlds = [];
@@ -740,6 +981,86 @@
     if (chooser && chooser.node) chooser.node.remove();
     chooser = null;
   };
+
+  /* ------------------------------------------------ co-op level picker */
+
+  function worldLabel(w) {
+    var key = 'world_' + w;
+    var s = t(key);
+    return s === key ? w : s;
+  }
+
+  UI.levelLabel = function (key) {
+    var f = MP.findLevel(key);
+    return f ? t('coop_selected', { world: worldLabel(f.world), n: f.level.label }) : t('coop_map');
+  };
+
+  var coopWorld = null; // world tab shown in the picker (host side)
+
+  function renderCoopLevel(opts, opt, state, s, edit) {
+    var picked = MP.findLevel(s.coopLevel);
+    opt(
+      t('coop_level'),
+      segment(
+        [
+          { value: 'map', label: t('coop_map') },
+          { value: 'pick', label: t('coop_pick') },
+        ],
+        picked ? 'pick' : 'map',
+        !edit,
+        function (v) {
+          if (v === 'map') call('setting', 'coopLevel', 'map');
+          else if (!picked) call('setting', 'coopLevel', (coopWorld || 'egypt') + ':1');
+        },
+      ),
+    );
+    if (!picked) {
+      opts.appendChild(el('div.mp-note', { text: t('coop_map_desc') }));
+      if (state.mapLocked) opts.appendChild(el('div.mp-warn-box', { text: t('coop_map_locked') }));
+      opts.appendChild(el('div.mp-note', { text: t('coop_options_note') }));
+      return;
+    }
+    opts.appendChild(el('div.mp-coop-selected', { text: UI.levelLabel(s.coopLevel) }));
+    opts.appendChild(el('div.mp-note', { text: t('coop_pick_desc') }));
+    if (!edit) return;
+    if (!coopWorld || !MP.LEVELS.some(function (w) {
+      return w.world === coopWorld;
+    })) coopWorld = picked.world;
+    opt(
+      t('coop_world'),
+      segment(
+        MP.LEVELS.map(function (w) {
+          return { value: w.world, label: worldLabel(w.world) };
+        }),
+        coopWorld,
+        false,
+        function (v) {
+          coopWorld = v;
+          UI.rebuildLobby(lobbyState);
+        },
+        'mp-worlds',
+      ),
+    );
+    var world = MP.LEVELS.find(function (w) {
+      return w.world === coopWorld;
+    });
+    var grid = el('div.mp-level-grid');
+    world.levels.forEach(function (lv) {
+      var key = world.world + ':' + lv.label;
+      var kindTitle = lv.kind === 3 ? t('level_boss') : lv.kind === 4 ? t('level_quest') : lv.kind === 1 ? t('level_special') : '';
+      grid.appendChild(
+        el('button.mp-level.mp-level-k' + lv.kind + (key === s.coopLevel ? '.mp-on' : ''), {
+          text: lv.label,
+          title: worldLabel(world.world) + ' ' + lv.label + (kindTitle ? ' • ' + kindTitle : ''),
+          onclick: function () {
+            call('setting', 'coopLevel', key);
+          },
+        }),
+      );
+    });
+    opts.appendChild(grid);
+    opts.appendChild(el('div.mp-note', { text: t('coop_options_note') }));
+  }
 
   function renderRoom(win, state) {
     var s = state.settings;
@@ -840,7 +1161,7 @@
       };
     }
     if (s.mode === 'coop') {
-      opts.appendChild(el('div.mp-note', { text: t('coop_options_note') }));
+      renderCoopLevel(opts, opt, state, s, edit);
     } else {
       var stageOptions = Object.keys(MP.STAGES).map(function (k) {
         return { value: k, label: t(MP.STAGES[k].label), img: MP.STAGES[k].img };

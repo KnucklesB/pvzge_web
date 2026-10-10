@@ -14,6 +14,9 @@
  *   PEER_KEY         PeerJS API key shared with the clients (default "peerjs")
  *   PROXIED          "true" when running behind a reverse proxy
  *   MAX_SAVE_MB      maximum cloud save size (default 8)
+ *   ADMIN_USERS      comma separated usernames allowed to edit saves (their
+ *                    own and every player's) and to import save files
+ *   SAVE_IMPORT      "admins" (default) or "all": who may import save files
  */
 'use strict';
 
@@ -23,7 +26,7 @@ const { ExpressPeerServer } = require('peer');
 const { Store } = require('./store');
 const auth = require('./auth');
 
-const VERSION = '2.1.0';
+const VERSION = '2.2.0';
 const PORT = Number(process.env.PORT) || 9000;
 const MAX_SAVE = (Number(process.env.MAX_SAVE_MB) || 8) * 1024 * 1024;
 const ORIGINS = (process.env.ALLOWED_ORIGINS || '*')
@@ -31,6 +34,13 @@ const ORIGINS = (process.env.ALLOWED_ORIGINS || '*')
   .map((s) => s.trim())
   .filter(Boolean);
 const ROOM_TTL = 45 * 1000;
+const ADMINS = new Set(
+  (process.env.ADMIN_USERS || '')
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+);
+const IMPORT_ALL = (process.env.SAVE_IMPORT || '').toLowerCase() === 'all';
 
 const store = new Store(process.env.DATA_DIR || require('path').join(__dirname, 'data'));
 const app = express();
@@ -120,6 +130,34 @@ function requireUser(req, res, next) {
   next();
 }
 
+function isAdmin(user) {
+  return !!user && ADMINS.has(user.username.toLowerCase());
+}
+
+function requireAdmin(req, res, next) {
+  requireUser(req, res, () => {
+    if (!isAdmin(req.user)) return res.status(403).json({ error: 'forbidden' });
+    next();
+  });
+}
+
+// The account as its owner sees it, with what it is allowed to do.
+function userView(user) {
+  const admin = isAdmin(user);
+  return Object.assign(store.publicUser(user), { admin, can: { editSave: admin, importSave: admin || IMPORT_ALL } });
+}
+
+function validSave(data) {
+  if (typeof data !== 'string' || !data.length) return 'bad_save';
+  if (Buffer.byteLength(data) > MAX_SAVE) return 'save_too_large';
+  try {
+    JSON.parse(data);
+  } catch (e) {
+    return 'bad_save';
+  }
+  return null;
+}
+
 function optionalUser(req, res, next) {
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : '';
@@ -130,7 +168,7 @@ function optionalUser(req, res, next) {
 /* ------------------------------------------------------------------- API */
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, version: VERSION, features: ['accounts', 'saves', 'rooms', 'matches'] });
+  res.json({ ok: true, version: VERSION, features: ['accounts', 'saves', 'rooms', 'matches', 'admin'] });
 });
 
 // Accounts ---------------------------------------------------------------
@@ -147,7 +185,7 @@ app.post('/api/auth/register', limit('auth', 10), json, async (req, res) => {
   const hash = await auth.hashPassword(password);
   const user = store.createUser(username, hash);
   const token = store.createSession(user.id);
-  res.json({ token, user: store.publicUser(user) });
+  res.json({ token, user: userView(user) });
 });
 
 app.post('/api/auth/login', limit('auth', 10), json, async (req, res) => {
@@ -157,7 +195,7 @@ app.post('/api/auth/login', limit('auth', 10), json, async (req, res) => {
   const ok = user ? await auth.verifyPassword(password, user.password) : await auth.fakeVerify();
   if (!ok) return res.status(401).json({ error: 'bad_credentials' });
   const token = store.createSession(user.id);
-  res.json({ token, user: store.publicUser(user) });
+  res.json({ token, user: userView(user) });
 });
 
 app.post('/api/auth/logout', requireUser, (req, res) => {
@@ -166,7 +204,7 @@ app.post('/api/auth/logout', requireUser, (req, res) => {
 });
 
 app.get('/api/auth/me', requireUser, (req, res) => {
-  res.json({ user: store.publicUser(req.user) });
+  res.json({ user: userView(req.user) });
 });
 
 app.post('/api/auth/password', limit('auth', 10), requireUser, json, async (req, res) => {
@@ -195,19 +233,54 @@ app.get('/api/save', limit('save', 30), requireUser, (req, res) => {
 
 app.put('/api/save', limit('save', 30), requireUser, bigJson, (req, res) => {
   const data = req.body && req.body.data;
-  if (typeof data !== 'string' || !data.length) return res.status(400).json({ error: 'bad_save' });
-  if (Buffer.byteLength(data) > MAX_SAVE) return res.status(413).json({ error: 'save_too_large' });
-  try {
-    JSON.parse(data);
-  } catch (e) {
-    return res.status(400).json({ error: 'bad_save' });
-  }
+  const bad = validSave(data);
+  if (bad) return res.status(bad === 'save_too_large' ? 413 : 400).json({ error: bad });
   const meta = store.saveMeta(req.user.id);
   const base = req.body.base;
   if (meta && base != null && Number(base) !== meta.updatedAt && !req.body.force) {
     return res.status(409).json({ error: 'conflict', save: meta });
   }
   const saved = store.writeSave(req.user.id, data, clean(req.body.device, 60));
+  res.json({ save: saved });
+});
+
+// Administration (ADMIN_USERS) -------------------------------------------
+
+app.get('/api/admin/users', limit('admin', 120), requireAdmin, (req, res) => {
+  const q = clean(req.query.q, 20).toLowerCase();
+  const list = store
+    .listUsers()
+    .filter((u) => !q || u.username.toLowerCase().includes(q))
+    .sort((a, b) => ((b.save && b.save.updatedAt) || 0) - ((a.save && a.save.updatedAt) || 0))
+    .slice(0, 50)
+    .map((u) => ({ id: u.id, username: u.username, createdAt: u.createdAt, admin: isAdmin(u), save: u.save || null }));
+  res.json({ users: list });
+});
+
+function targetUser(req, res) {
+  const u = store.findUser(req.params.name);
+  if (!u) res.status(404).json({ error: 'not_found' });
+  return u;
+}
+
+app.get('/api/admin/users/:name/save', limit('admin', 120), requireAdmin, (req, res) => {
+  const u = targetUser(req, res);
+  if (!u) return;
+  const meta = store.saveMeta(u.id);
+  res.json({ save: meta ? Object.assign({ data: store.readSave(u.id) }, meta) : null });
+});
+
+// Replaces a player's cloud save (the previous one is kept as a backup).
+// Their game downloads it on its next sync.
+app.put('/api/admin/users/:name/save', limit('admin', 60), requireAdmin, bigJson, (req, res) => {
+  const u = targetUser(req, res);
+  if (!u) return;
+  const data = req.body && req.body.data;
+  const bad = validSave(data);
+  if (bad) return res.status(bad === 'save_too_large' ? 413 : 400).json({ error: bad });
+  store.backupSave(u.id);
+  const saved = store.writeSave(u.id, data, 'admin:' + req.user.username);
+  console.log('[admin] %s replaced the save of %s', req.user.username, u.username);
   res.json({ save: saved });
 });
 
