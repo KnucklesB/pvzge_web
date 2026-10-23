@@ -3,8 +3,9 @@
  *
  * A Session wraps PeerJS (WebRTC). The host owns the room (its peer id is
  * derived from the room code), runs the authoritative game and streams its
- * canvas + audio to the guest. Both sides exchange small JSON messages over
- * a reliable data channel: lobby state, inputs, HUD state, chat...
+ * canvas + audio to every guest (star topology, up to 3 guests). Each guest
+ * has its own reliable data channel with the host for lobby state, inputs,
+ * HUD state and chat; the host relays what the others need to know.
  */
 (function () {
   'use strict';
@@ -90,28 +91,79 @@
     return e;
   }
 
+  /*
+   * One remote player as seen from this side: for the host, each guest; for a
+   * guest, the host. Slot 0 is always the host, guests get slots 1..3.
+   */
+  function Link(slot, conn, name) {
+    this.slot = slot;
+    this.conn = conn;
+    this.name = name;
+    this.info = null; // {account, ticket} sent by a guest
+    this.rtt = 0;
+    this.lastSeen = util.now();
+    this.out = null; // media we send to them
+    this.outSrc = null; // whose lawn that media shows (slot)
+    this.watch = 0; // host: whose lawn this guest wants to see
+    this.inCall = null; // media they send to us
+    this.inStream = null;
+    this.pingSeq = 0;
+    this.pingSent = {};
+  }
+
   function Session() {
     MP.Emitter.call(this);
     this.role = null; // 'host' | 'guest'
     this.peer = null;
-    this.conn = null;
-    this.call = null; // outgoing media (our canvas)
-    this.inCall = null; // incoming media (the other player's canvas)
+    this.links = {}; // slot -> Link
+    this.slot = 0; // our own slot
+    this.maxGuests = 3;
     this.code = null;
     this.localName = '';
-    this.remoteName = '';
-    this.rtt = 0;
-    this.connected = false;
-    this._lastSeen = 0;
     this._hb = null;
-    this._pingSeq = 0;
-    this._pingSent = {};
     this._closing = false;
-    this._stream = null;
+    this._local = null; // our canvas (+ game audio) stream
+    this._canvas = null;
     this.quality = 'medium';
   }
   Session.prototype = Object.create(MP.Emitter.prototype);
   Session.prototype.constructor = Session;
+
+  Session.MAX_PLAYERS = 4;
+
+  Session.prototype.guests = function () {
+    var self = this;
+    return Object.keys(this.links)
+      .map(Number)
+      .filter(function (s) {
+        return s > 0 && self.links[s];
+      })
+      .sort()
+      .map(function (s) {
+        return self.links[s];
+      });
+  };
+
+  Session.prototype.link = function (slot) {
+    return this.links[slot] || null;
+  };
+
+  Object.defineProperty(Session.prototype, 'connected', {
+    get: function () {
+      return this.role === 'guest' ? !!this.links[0] : this.guests().length > 0;
+    },
+  });
+  // Guest side: the host's name and our round trip time to the host.
+  Object.defineProperty(Session.prototype, 'remoteName', {
+    get: function () {
+      return this.links[0] ? this.links[0].name : '';
+    },
+  });
+  Object.defineProperty(Session.prototype, 'rtt', {
+    get: function () {
+      return this.links[0] ? this.links[0].rtt : 0;
+    },
+  });
 
   Session.prototype._createPeer = function (id) {
     var self = this;
@@ -155,6 +207,9 @@
           }, 1500);
         }
       });
+      peer.on('call', function (call) {
+        self._onCall(call);
+      });
     });
   };
 
@@ -169,10 +224,12 @@
 
   /* -------------------------------------------------------------------- host */
 
-  Session.prototype.host = function (name) {
+  Session.prototype.host = function (name, maxPlayers) {
     var self = this;
     this.role = 'host';
+    this.slot = 0;
     this.localName = name;
+    this.setMaxPlayers(maxPlayers);
     this._closing = false;
     var attempt = 0;
     function tryOpen() {
@@ -183,14 +240,6 @@
           self.code = code;
           peer.on('connection', function (conn) {
             self._onIncoming(conn);
-          });
-          peer.on('call', function (call) {
-            // Only the connected guest may stream to us (Survival).
-            if (!self.conn || call.peer !== self.conn.peer) {
-              call.close();
-              return;
-            }
-            self._onCall(call);
           });
           return code;
         },
@@ -203,45 +252,46 @@
     return tryOpen();
   };
 
+  Session.prototype.setMaxPlayers = function (n) {
+    n = Math.max(2, Math.min(Session.MAX_PLAYERS, Number(n) || Session.MAX_PLAYERS));
+    this.maxGuests = n - 1;
+  };
+
+  Session.prototype._freeSlot = function () {
+    for (var s = 1; s <= this.maxGuests; s++) if (!this.links[s]) return s;
+    return 0;
+  };
+
+  function refuse(conn, reason) {
+    try {
+      conn.send({ t: 'reject', reason: reason });
+    } catch (e) {}
+    setTimeout(function () {
+      try {
+        conn.close();
+      } catch (e) {}
+    }, 600);
+  }
+
   Session.prototype._onIncoming = function (conn) {
     var self = this;
-    if (this.conn && this.conn.open) {
-      conn.on('open', function () {
-        conn.send({ t: 'reject', reason: 'err_full' });
-        setTimeout(function () {
-          conn.close();
-        }, 600);
-      });
-      return;
-    }
     var gotHello = false;
     var helloTimer = setTimeout(function () {
       if (!gotHello) conn.close();
     }, 10000);
     conn.on('data', function onData(msg) {
-      if (gotHello) return;
-      if (!msg || msg.t !== 'hello') return;
+      if (gotHello || !msg || msg.t !== 'hello') return;
       gotHello = true;
       clearTimeout(helloTimer);
       conn.off('data', onData);
-      if (msg.v !== MP.PROTOCOL) {
-        conn.send({ t: 'reject', reason: 'err_version' });
-        setTimeout(function () {
-          conn.close();
-        }, 600);
-        return;
-      }
-      if (self.conn && self.conn.open) {
-        conn.send({ t: 'reject', reason: 'err_full' });
-        setTimeout(function () {
-          conn.close();
-        }, 600);
-        return;
-      }
-      self.remoteName = String(msg.name || 'Player').slice(0, 20);
-      self.remoteInfo = { account: msg.account ? String(msg.account).slice(0, 20) : null, ticket: msg.ticket ? String(msg.ticket).slice(0, 400) : null };
-      self._attach(conn);
-      self.emit('peer-joined', { name: self.remoteName });
+      if (msg.v !== MP.PROTOCOL) return refuse(conn, 'err_version');
+      var slot = self._freeSlot();
+      if (!slot) return refuse(conn, 'err_full');
+      var link = new Link(slot, conn, String(msg.name || 'Player').slice(0, 20));
+      link.info = { account: msg.account ? String(msg.account).slice(0, 20) : null, ticket: msg.ticket ? String(msg.ticket).slice(0, 400) : null };
+      self.links[slot] = link;
+      self._attach(link);
+      self.emit('peer-joined', link);
     });
   };
 
@@ -256,13 +306,6 @@
     this._closing = false;
     return this._createPeer(null).then(function (peer) {
       self.peer = peer;
-      peer.on('call', function (call) {
-        if (!self.conn || call.peer !== self.conn.peer) {
-          call.close();
-          return;
-        }
-        self._onCall(call);
-      });
       return new Promise(function (resolve, reject) {
         var settled = false;
         var conn = peer.connect(MP.config.roomPrefix + self.code.toLowerCase(), {
@@ -293,8 +336,10 @@
             clearTimeout(timer);
             self.off('error', fail);
             conn.off('data', onData);
-            self.remoteName = String(msg.name || 'Host').slice(0, 20);
-            self._attach(conn);
+            self.slot = Number(msg.you) || 1;
+            var link = new Link(0, conn, String(msg.name || 'Host').slice(0, 20));
+            self.links[0] = link;
+            self._attach(link);
             resolve(msg);
           }
         });
@@ -305,22 +350,50 @@
     });
   };
 
+  /* ------------------------------------------------------------------ shared */
+
+  Session.prototype._linkByPeer = function (peerId) {
+    var self = this;
+    var found = null;
+    Object.keys(this.links).forEach(function (s) {
+      var l = self.links[s];
+      if (l && l.conn && l.conn.peer === peerId) found = l;
+    });
+    return found;
+  };
+
+  // Media from a known player: a guest's own lawn (host side, Survival) or
+  // the lawn the host shows us (guest side; metadata.src = whose lawn).
   Session.prototype._onCall = function (call) {
     var self = this;
-    if (this.inCall) {
+    var link = this._linkByPeer(call.peer);
+    if (!link) {
+      call.close();
+      return;
+    }
+    var src = this.role === 'guest' ? Number(call.metadata && call.metadata.src) || 0 : link.slot;
+    if (link.inCall && link.inCall !== call) {
       try {
-        this.inCall.close();
+        link.inCall.close();
       } catch (e) {}
     }
-    this.inCall = call;
+    link.inCall = call;
     call.on('stream', function (stream) {
-      self.emit('stream', stream);
+      if (link.inCall !== call) return;
+      link.inStream = stream;
+      self.emit('stream', stream, src, link);
+      // Host: other guests watching this lawn get it relayed.
+      if (self.role === 'host') {
+        self.guests().forEach(function (g) {
+          if (g !== link && g.watch === link.slot) self.streamTo(g.slot, link.slot, true);
+        });
+      }
     });
     call.on('close', function () {
-      if (self.inCall === call) {
-        self.inCall = null;
-        self.emit('stream-ended');
-      }
+      if (link.inCall !== call) return;
+      link.inCall = null;
+      link.inStream = null;
+      self.emit('stream-ended', src, link);
     });
     call.on('error', function (err) {
       MP.warn('media error', err);
@@ -328,162 +401,236 @@
     call.answer(undefined, { sdpTransform: boostSdp(2500) });
   };
 
-  /* ------------------------------------------------------------------ shared */
-
-  Session.prototype._attach = function (conn) {
+  Session.prototype._attach = function (link) {
     var self = this;
-    this.conn = conn;
-    this.connected = true;
-    this._lastSeen = util.now();
+    var conn = link.conn;
+    link.lastSeen = util.now();
     conn.on('data', function (msg) {
-      self._lastSeen = util.now();
+      link.lastSeen = util.now();
       if (!msg || typeof msg.t !== 'string') return;
       if (msg.t === 'ping') {
-        self.rtt = msg.rtt || self.rtt;
+        link.rtt = msg.rtt || link.rtt;
         conn.send({ t: 'pong', id: msg.id });
-        self.emit('rtt', self.rtt);
+        self.emit('rtt', link);
         return;
       }
       if (msg.t === 'pong') {
-        var sent = self._pingSent[msg.id];
+        var sent = link.pingSent[msg.id];
         if (sent) {
-          self.rtt = Math.round(util.now() - sent);
-          delete self._pingSent[msg.id];
-          self.emit('rtt', self.rtt);
+          link.rtt = Math.round(util.now() - sent);
+          delete link.pingSent[msg.id];
+          self.emit('rtt', link);
         }
         return;
       }
       if (msg.t === 'bye') {
-        self._dropPeer('bye');
+        self._drop(link, msg.reason === 'kicked' ? 'kicked' : 'bye');
         return;
       }
-      self.emit('message', msg);
-      self.emit('msg:' + msg.t, msg);
+      self.emit('message', msg, link);
     });
     conn.on('close', function () {
-      if (self.conn === conn) self._dropPeer('closed');
+      if (self.links[link.slot] === link) self._drop(link, 'closed');
     });
     conn.on('error', function (err) {
       MP.warn('data channel error', err);
     });
-    clearInterval(this._hb);
-    this._hb = setInterval(function () {
-      self._heartbeat();
-    }, HEARTBEAT_MS);
+    if (!this._hb) {
+      this._hb = setInterval(function () {
+        self._heartbeat();
+      }, HEARTBEAT_MS);
+    }
   };
 
   Session.prototype._heartbeat = function () {
-    if (!this.conn) return;
-    if (util.now() - this._lastSeen > TIMEOUT_MS) {
-      this._dropPeer('timeout');
-      return;
-    }
-    if (this.role === 'host' && this.conn.open) {
-      var id = ++this._pingSeq;
-      this._pingSent[id] = util.now();
-      if (id > 30) delete this._pingSent[id - 30];
-      this.conn.send({ t: 'ping', id: id, rtt: this.rtt });
-    }
+    var self = this;
+    var now = util.now();
+    Object.keys(this.links).forEach(function (s) {
+      var link = self.links[s];
+      if (!link) return;
+      if (now - link.lastSeen > TIMEOUT_MS) return self._drop(link, 'timeout');
+      if (self.role === 'host' && link.conn.open) {
+        var id = ++link.pingSeq;
+        link.pingSent[id] = now;
+        if (id > 30) delete link.pingSent[id - 30];
+        try {
+          link.conn.send({ t: 'ping', id: id, rtt: link.rtt });
+        } catch (e) {}
+      }
+    });
   };
 
-  Session.prototype._dropPeer = function (reason) {
-    var conn = this.conn;
-    if (!conn) return;
-    this.conn = null;
-    this.connected = false;
-    clearInterval(this._hb);
-    this._hb = null;
+  function closeQuietly(x) {
     try {
-      conn.close();
+      if (x) x.close();
     } catch (e) {}
-    this.stopStream();
-    if (this.inCall) {
-      try {
-        this.inCall.close();
-      } catch (e) {}
-      this.inCall = null;
+  }
+
+  Session.prototype._drop = function (link, reason) {
+    if (this.links[link.slot] !== link) return;
+    delete this.links[link.slot];
+    closeQuietly(link.conn);
+    closeQuietly(link.out);
+    closeQuietly(link.inCall);
+    link.out = link.inCall = link.inStream = null;
+    var self = this;
+    if (this.role === 'host') {
+      // Whoever watched that lawn goes back to the host's.
+      this.guests().forEach(function (g) {
+        if (g.watch === link.slot) self.streamTo(g.slot, 0);
+      });
     }
-    var name = this.remoteName;
-    this.emit('peer-left', { name: name, reason: reason });
+    this.emit('peer-left', link, reason);
   };
 
-  Session.prototype.send = function (msg) {
-    if (this.conn && this.conn.open) {
+  function sendOn(link, msg) {
+    if (link && link.conn && link.conn.open) {
       try {
-        this.conn.send(msg);
+        link.conn.send(msg);
         return true;
       } catch (e) {
         MP.warn('send failed', e);
       }
     }
     return false;
+  }
+
+  // Host: to every guest (but `except`); guest: to the host.
+  Session.prototype.send = function (msg, except) {
+    if (this.role === 'guest') return sendOn(this.links[0], msg);
+    var ok = false;
+    this.guests().forEach(function (g) {
+      if (g.slot !== except) ok = sendOn(g, msg) || ok;
+    });
+    return ok;
   };
 
-  Session.prototype.welcome = function (payload) {
-    this.send(Object.assign({ t: 'welcome', v: MP.PROTOCOL, name: this.localName, code: this.code }, payload || {}));
+  Session.prototype.sendTo = function (slot, msg) {
+    return sendOn(this.links[slot], msg);
   };
 
-  Session.prototype.kick = function () {
-    this.send({ t: 'bye' });
-    this._dropPeer('kicked');
+  Session.prototype.welcome = function (link, payload) {
+    sendOn(link, Object.assign({ t: 'welcome', v: MP.PROTOCOL, name: this.localName, code: this.code, you: link.slot }, payload || {}));
+  };
+
+  Session.prototype.kick = function (slot, reason) {
+    var link = this.links[slot];
+    if (!link) return;
+    sendOn(link, { t: 'bye', reason: reason || 'kicked' });
+    this._drop(link, 'kicked');
   };
 
   /* ------------------------------------------------------------------ stream */
 
-  Session.prototype.startStream = function (canvas, quality) {
-    if (!this.conn) return false;
+  Session.prototype._localStream = function (canvas, quality) {
     this.quality = QUALITY[quality] ? quality : this.quality;
-    var q = QUALITY[this.quality];
-    if (!canvas.captureStream) {
+    if (this._local && this._canvas === canvas && this._local.getVideoTracks()[0] && this._local.getVideoTracks()[0].readyState === 'live') return this._local;
+    if (!canvas || !canvas.captureStream) {
       MP.warn('canvas.captureStream unsupported');
-      return false;
+      return null;
     }
-    this.stopStream();
-    var stream = canvas.captureStream(q.fps);
+    this._stopLocal();
+    var stream = canvas.captureStream(QUALITY[this.quality].fps);
     var video = stream.getVideoTracks()[0];
     if (video && 'contentHint' in video) video.contentHint = 'motion';
     var audio = MP.audio.getStream();
     if (audio && audio.getAudioTracks()[0]) stream.addTrack(audio.getAudioTracks()[0]);
-    this._stream = stream;
-    var call = this.peer.call(this.conn.peer, stream, { sdpTransform: boostSdp(Math.round((q.bitrate * 0.7) / 1000)) });
-    this.call = call;
+    this._local = stream;
+    this._canvas = canvas;
+    return stream;
+  };
+
+  Session.prototype._stopLocal = function () {
+    if (!this._local) return;
+    this._local.getVideoTracks().forEach(function (t) {
+      t.stop();
+    });
+    this._local = null;
+  };
+
+  /*
+   * Starts sending our lawn. Host: to every guest (each one gets the lawn
+   * they asked to watch, the host's by default). Guest: to the host.
+   */
+  Session.prototype.startStream = function (canvas, quality) {
+    var local = this._localStream(canvas, quality);
+    if (!local) return false;
+    var self = this;
+    if (this.role === 'host') {
+      this.guests().forEach(function (g) {
+        self.streamTo(g.slot, g.watch || 0, true);
+      });
+      return true;
+    }
+    var host = this.links[0];
+    if (!host) return false;
+    closeQuietly(host.out);
+    host.out = this._call(host, local, this.slot);
+    host.outSrc = this.slot;
+    return true;
+  };
+
+  // Host: (re)send to one guest the lawn of `src` (0 = ours, else a guest's,
+  // relayed). Without that lawn yet, the guest waits until it arrives.
+  Session.prototype.streamTo = function (slot, src, restart) {
+    var link = this.links[slot];
+    if (!link || this.role !== 'host') return;
+    src = Number(src) || 0;
+    link.watch = src;
+    if (!restart && link.out && link.outSrc === src) return;
+    var stream = src === 0 ? this._local : this.links[src] && this.links[src].inStream;
+    closeQuietly(link.out);
+    link.out = null;
+    link.outSrc = null;
+    if (!stream || src === slot) return;
+    link.out = this._call(link, stream, src);
+    link.outSrc = src;
+  };
+
+  Session.prototype._call = function (link, stream, src) {
+    var q = QUALITY[this.quality];
+    var call = this.peer.call(link.conn.peer, stream, { metadata: { src: src }, sdpTransform: boostSdp(Math.round((q.bitrate * 0.7) / 1000)) });
     var self = this;
     call.on('close', function () {
-      if (self.call === call) self.call = null;
+      if (link.out === call) link.out = null;
     });
     call.on('error', function (err) {
       MP.warn('media call error', err);
     });
-    this._tuneSender(call, canvas, 0);
-    return true;
+    this._tuneSender(link, call, 0);
+    return call;
   };
 
-  Session.prototype._tuneSender = function (call, canvas, tries) {
+  Session.prototype._tuneSender = function (link, call, tries) {
     var self = this;
-    if (call !== this.call || tries > 40) return;
+    if (call !== link.out && tries > 0) return;
+    if (tries > 40) return;
     var pc = call.peerConnection;
     var ready = pc && (pc.connectionState === 'connected' || pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed');
     if (!ready) {
       setTimeout(function () {
-        self._tuneSender(call, canvas, tries + 1);
+        self._tuneSender(link, call, tries + 1);
       }, 500);
       return;
     }
-    this.applyQuality(this.quality, canvas);
+    this._applyTo(call);
   };
 
-  Session.prototype.applyQuality = function (quality, canvas) {
-    if (QUALITY[quality]) this.quality = quality;
+  Session.prototype._applyTo = function (call) {
     var q = QUALITY[this.quality];
-    var pc = this.call && this.call.peerConnection;
+    var pc = call && call.peerConnection;
     if (!pc) return;
+    // Several viewers share the host's upload: split the bitrate a little.
+    var viewers = Math.max(1, this.role === 'host' ? this.guests().length : 1);
+    var bitrate = Math.round(q.bitrate / Math.sqrt(viewers));
+    var canvas = this._canvas;
     pc.getSenders().forEach(function (sender) {
       if (!sender.track || sender.track.kind !== 'video') return;
       try {
         var params = sender.getParameters();
         if (!params.encodings || !params.encodings.length) params.encodings = [{}];
         var h = (canvas && canvas.height) || q.height;
-        params.encodings[0].maxBitrate = q.bitrate;
+        params.encodings[0].maxBitrate = bitrate;
         params.encodings[0].maxFramerate = q.fps;
         params.encodings[0].scaleResolutionDownBy = Math.max(1, h / q.height);
         params.degradationPreference = 'balanced';
@@ -496,45 +643,51 @@
     });
   };
 
+  Session.prototype.applyQuality = function (quality, canvas) {
+    if (QUALITY[quality]) this.quality = quality;
+    if (canvas) this._canvas = canvas;
+    var self = this;
+    Object.keys(this.links).forEach(function (s) {
+      var l = self.links[s];
+      if (l && l.out) self._applyTo(l.out);
+    });
+  };
+
   Session.prototype.stopStream = function () {
-    if (this.call) {
-      try {
-        this.call.close();
-      } catch (e) {}
-      this.call = null;
-    }
-    if (this._stream) {
-      this._stream.getVideoTracks().forEach(function (t) {
-        t.stop();
-      });
-      this._stream = null;
-    }
+    var self = this;
+    Object.keys(this.links).forEach(function (s) {
+      var l = self.links[s];
+      if (!l) return;
+      closeQuietly(l.out);
+      l.out = null;
+      l.outSrc = null;
+      if (self.role === 'host') l.watch = 0;
+    });
+    this._stopLocal();
   };
 
   Session.prototype.close = function (silent) {
     this._closing = true;
-    if (this.conn && this.conn.open) {
-      try {
-        this.conn.send({ t: 'bye' });
-      } catch (e) {}
-    }
-    var conn = this.conn;
-    this.conn = null;
-    this.connected = false;
-    clearInterval(this._hb);
+    var self = this;
+    var links = Object.keys(this.links).map(function (s) {
+      return self.links[s];
+    });
+    links.forEach(function (l) {
+      sendOn(l, { t: 'bye' });
+    });
     this.stopStream();
-    if (this.inCall) {
-      try {
-        this.inCall.close();
-      } catch (e) {}
-      this.inCall = null;
-    }
+    links.forEach(function (l) {
+      closeQuietly(l.inCall);
+    });
+    this.links = {};
+    clearInterval(this._hb);
+    this._hb = null;
     var peer = this.peer;
     this.peer = null;
     setTimeout(function () {
-      try {
-        if (conn) conn.close();
-      } catch (e) {}
+      links.forEach(function (l) {
+        closeQuietly(l.conn);
+      });
       try {
         if (peer) peer.destroy();
       } catch (e) {}

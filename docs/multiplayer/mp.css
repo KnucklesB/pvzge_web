@@ -14,6 +14,8 @@
   --mp-red: #ff5a4a;
   --mp-p1: #7cff4a;
   --mp-p2: #ff9b2e;
+  --mp-p3: #4ab8ff;
+  --mp-p4: #e06bff;
   --mp-outline: 0 2px 0 #000, 0 -1px 0 #000, 1px 0 0 #000, -1px 0 0 #000, 1px 1px 0 #000, -1px 1px 0 #000,
     1px -1px 0 #000, -1px -1px 0 #000;
 }
@@ -1979,4 +1981,113 @@ button.mp-zpacket:hover:not(:disabled) {
 .mp-menu-account.mp-cloud-conflict .mp-menu-account-dot {
   display: inline-block;
   background: var(--mp-red);
+}
+
+/* ======================================================= up to 4 players */
+.mp-players-many {
+  gap: 6px;
+}
+.mp-players-many .mp-player {
+  height: 44px;
+  font-size: 18px;
+  border-radius: 13px;
+}
+.mp-side-chip {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border: 2px solid #2b1608;
+  border-radius: 9px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  background: #6fd64b;
+  transition: transform 0.08s, filter 0.12s;
+}
+.mp-side-chip.mp-side-zombies {
+  background: #b48ad8;
+}
+.mp-side-chip:hover:not(:disabled) {
+  filter: brightness(1.12);
+  transform: scale(1.08);
+}
+.mp-side-chip:disabled {
+  cursor: default;
+}
+.mp-kick {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 2px solid #5a1208;
+  border-radius: 8px;
+  background: #d8432f;
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.mp-kick:hover {
+  filter: brightness(1.15);
+}
+.mp-badge-side {
+  font-size: 13px;
+}
+
+/* each player's color on the shared lawn */
+.mp-sel {
+  border-color: var(--mp-c, var(--mp-p2));
+  box-shadow: 0 0 14px var(--mp-c, var(--mp-p2));
+}
+.mp-sel-tag,
+.mp-cursor-name,
+.mp-cursor-held {
+  background: var(--mp-c, var(--mp-p2));
+}
+.mp-cursor svg path {
+  fill: var(--mp-c, var(--mp-p2));
+}
+.mp-cell.mp-colored {
+  border-color: var(--mp-c);
+  box-shadow: 0 0 12px var(--mp-c);
+  background: rgba(255, 255, 255, 0.12);
+}
+.mp-lane.mp-colored {
+  border-color: var(--mp-c);
+}
+
+/* survival: switch between the other players' lawns */
+.mp-pip-nav {
+  display: none;
+}
+#pvzmp-pip.mp-pip-has-nav .mp-pip-nav {
+  display: inline-flex;
+}
+.mp-pip-wait {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: calc(100% - 34px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+#pvzmp-pip.mp-pip-waiting .mp-pip-wait {
+  display: flex;
+}
+.mp-stats .mp-h .mp-player-dot {
+  display: inline-block;
+  vertical-align: -1px;
+  width: 12px;
+  height: 12px;
+}
+.mp-badge-status {
+  color: #ffe9b8;
+  font-size: 12px;
+  opacity: 0.9;
+}
+.mp-badge-status::before {
+  content: '• ';
+}
+#pvzmp-badge {
+  top: 42%;
 }

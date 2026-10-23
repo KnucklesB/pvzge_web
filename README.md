@@ -35,17 +35,17 @@ Install Git LFS before cloning this repository. After pulling updates, run `git 
 
 ## Multiplayer
 
-Click **Multiplayer** on the main menu to play with a friend over the internet. Create a room and share the 5-letter code or invite link, or join one from the public room list.
+Click **Multiplayer** on the main menu to play with up to 3 friends (4 players) over the internet. Create a room and share the 5-letter code or invite link, or join one from the public room list. The host can limit the room to 2, 3 or 4 players and remove players; everyone's cursor is shown on the shared lawn in their own color.
 
 | Mode | How it plays |
 | --- | --- |
-| **Co-op** | Shared lawn: pick any campaign level of any world in the room (556 levels, bosses and plant quests included), even if the host's profile hasn't unlocked it, or let the host roam the game's own map. Both players share sun, seed packets and plant food, each with their own cursor, and both can pick seeds. |
-| **Versus** | Shared lawn: the plant player picks plants in the game's seed chooser; the zombie player builds a 6-zombie deck in the lobby with a seed chooser that shows the game's own zombie packets (every almanac zombie of every world, or only the arena's zombies) and spends brains to send zombies down any lane. Plants win by holding until the timer runs out; zombies win by reaching the house. |
-| **Survival** | One lawn per player: both run the same generated level with ever-growing waves on their own screen and watch each other's lawn live (picture-in-picture, can be enlarged). Whoever lasts more waves wins. |
+| **Co-op** | Shared lawn for up to 4 players: pick any campaign level of any world in the room (556 levels, bosses and plant quests included), even if the host's profile hasn't unlocked it, or let the host roam the game's own map. All players share sun, seed packets and plant food, each with their own cursor and selection, and all can pick seeds. |
+| **Versus** | Shared lawn, plant team vs. zombie team (1v1, 2v2, 1v3, 3v1, 2v1…; each player picks a side in the room). The plant team picks plants in the game's seed chooser and shares sun; the zombie team builds a 6-zombie deck in the lobby with a seed chooser that shows the game's own zombie packets (every almanac zombie of every world, or only the arena's zombies) and shares a brain bank (income grows a little with team size) to send zombies down any lane; every zombie player has their own selection. Plants win by holding until the timer runs out; zombies win by reaching the house. |
+| **Survival** | One lawn per player (up to 4): everyone runs the same generated level with ever-growing waves on their own screen and watches the others' lawns live (picture-in-picture with ◀ ▶ to switch players, can be enlarged). Whoever lasts more waves wins. |
 
-Match options (host): arena, side, duration, waves, difficulty, available plants (all, classic or own collection), seed slots, starting sun, sky sun rate, plant recharge, lawn mowers, available zombies, starting brains, brain income, zombie recharge, stream quality and room visibility.
+Match options (host): players in the room, arena, sides, duration, waves, difficulty, available plants (all, classic or own collection), seed slots, starting sun, sky sun rate, plant recharge, lawn mowers, available zombies, starting brains, brain income, zombie recharge, stream quality and room visibility.
 
-After a match both players stay in the room: rematch, change settings or leave. Either player can end a match early from the side panel. `Enter` opens the chat. The screens are available in English, Português and 中文.
+After a match everyone stays in the room: rematch, change settings or leave. Any player can end a match early from the side panel. `Enter` opens the chat. The screens are available in English, Português and 中文.
 
 ### Accounts, cloud saves, rooms and history
 
@@ -58,7 +58,7 @@ The game itself keeps its progress in the browser (`localStorage`, per profile n
 
 ### How it works
 
-Shared-lawn modes are host-authoritative: the host runs the real game and streams it to the guest over WebRTC (video + game audio); the guest's inputs travel back over a data channel and run through the game's own planting/shovel/plant-food/seed-chooser code paths, so everything behaves exactly as in single player. In Survival both players stream their own lawn to each other. The code lives in [`docs/multiplayer`](docs/multiplayer) and does not modify the game bundle.
+Shared-lawn modes are host-authoritative: the host runs the real game and streams it to each guest over WebRTC (video + game audio); the guests' inputs travel back over their data channels and run through the game's own planting/shovel/plant-food/seed-chooser code paths, so everything behaves exactly as in single player. In Survival every guest streams their own lawn to the host, which relays to each player the lawn they choose to watch. The code lives in [`docs/multiplayer`](docs/multiplayer) and does not modify the game bundle.
 
 ### Server
 

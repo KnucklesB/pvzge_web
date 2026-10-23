@@ -392,11 +392,18 @@
     return after === -1;
   };
 
-  // Pointer of the remote player in world space, used to collect sun etc.
-  G.remotePointer = { active: false, world: null, line: null };
+  // Pointers of the remote players (by slot) in world space, used to
+  // collect sun etc. by hovering, like the local mouse does.
+  G.remotePointers = {};
 
-  G.setRemotePointer = function (ui) {
-    var rp = G.remotePointer;
+  // setRemotePointer(slot, ui) - ui null hides it; setRemotePointer(null)
+  // clears every remote pointer.
+  G.setRemotePointer = function (slot, ui) {
+    if (slot == null) {
+      G.remotePointers = {};
+      return;
+    }
+    var rp = G.remotePointers[slot] || (G.remotePointers[slot] = { active: false, world: null, line: null });
     if (!ui || !G.inLevel()) {
       rp.active = false;
       rp.world = null;
@@ -567,15 +574,23 @@
       var origUpdate = Dropping.prototype.characterUpdate;
       Dropping.prototype.characterUpdate = function (dt) {
         origUpdate.call(this, dt);
-        var rp = G.remotePointer;
-        if (!rp.active || !rp.world) return;
+        var rps = G.remotePointers;
+        var slots = Object.keys(rps);
+        if (!slots.length) return;
         try {
           if (!this.node || !this.node.isValid) return;
           if (!this.mouseListen || !this.collectable() || !this.collectable_after()) return;
           var ut = this.node.getComponent(cc.UITransform);
           var size = ut.width * this.originalScale * this.dpScale;
           var rec = Rect.createRectangleNodeCenter(this.node, size, size);
-          if (rec.judgeInRecP(rp.world) || (rp.line && rec.judgeCrossLine(rp.line))) this.collect();
+          for (var i = 0; i < slots.length; i++) {
+            var rp = rps[slots[i]];
+            if (!rp.active || !rp.world) continue;
+            if (rec.judgeInRecP(rp.world) || (rp.line && rec.judgeCrossLine(rp.line))) {
+              this.collect();
+              return;
+            }
+          }
         } catch (e) {
           /* never break the game loop */
         }

@@ -26,7 +26,7 @@ const { ExpressPeerServer } = require('peer');
 const { Store } = require('./store');
 const auth = require('./auth');
 
-const VERSION = '2.2.0';
+const VERSION = '3.0.0';
 const PORT = Number(process.env.PORT) || 9000;
 const MAX_SAVE = (Number(process.env.MAX_SAVE_MB) || 8) * 1024 * 1024;
 const ORIGINS = (process.env.ALLOWED_ORIGINS || '*')
@@ -34,6 +34,7 @@ const ORIGINS = (process.env.ALLOWED_ORIGINS || '*')
   .map((s) => s.trim())
   .filter(Boolean);
 const ROOM_TTL = 45 * 1000;
+const MAX_PLAYERS = 4;
 const ADMINS = new Set(
   (process.env.ADMIN_USERS || '')
     .split(',')
@@ -388,8 +389,8 @@ app.put('/api/rooms/:code', limit('rooms', 120), optionalUser, json, (req, res) 
     host: clean(body.host, 20) || 'Player',
     mode: clean(body.mode, 16),
     stage: clean(body.stage, 16),
-    players: Math.max(1, Math.min(2, Number(body.players) || 1)),
-    max: 2,
+    max: Math.max(2, Math.min(MAX_PLAYERS, Number(body.max) || 2)),
+    players: Math.max(1, Math.min(MAX_PLAYERS, Number(body.players) || 1)),
     status: body.status === 'playing' ? 'playing' : 'waiting',
     public: body.public !== false,
     userId: req.user ? req.user.id : null,
@@ -414,7 +415,7 @@ app.post('/api/matches', limit('matches', 20), optionalUser, json, (req, res) =>
   const room = rooms.get(code);
   // Only the host of a live room may report its results.
   if (!room || room.key !== clean(b.key, 64)) return res.status(403).json({ error: 'forbidden' });
-  const players = (Array.isArray(b.players) ? b.players : []).slice(0, 2).map((p) => {
+  const players = (Array.isArray(b.players) ? b.players : []).slice(0, MAX_PLAYERS).map((p) => {
     let userId = null;
     if (p && p.self && req.user) userId = req.user.id;
     else if (p && p.ticket) userId = auth.verifyTicket(store.secret, String(p.ticket));

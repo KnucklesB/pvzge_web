@@ -23,6 +23,8 @@
   var t = MP.t;
 
   MP.MODE_LIST = ['coop', 'versus', 'survival'];
+  MP.MAX_PLAYERS = 4;
+  MP.SLOT_COLORS = ['var(--mp-p1)', 'var(--mp-p2)', 'var(--mp-p3)', 'var(--mp-p4)'];
 
   /* ============================================================ settings */
 
@@ -43,7 +45,7 @@
     zombieCooldown: { modes: ['versus'], values: [0.5, 0.75, 1, 1.5], def: 1, label: 'zombie_cooldown', fmt: 'mult' },
   };
 
-  MP.DEFAULT_SETTINGS = { mode: 'coop', stage: 'modern', hostSide: 'plants', quality: 'medium', public: true, zdeck: null, coopLevel: 'map' };
+  MP.DEFAULT_SETTINGS = { mode: 'coop', stage: 'modern', hostSide: 'plants', quality: 'medium', public: true, zdeck: null, coopLevel: 'map', maxPlayers: 4, sides: {} };
   Object.keys(MP.OPTIONS).forEach(function (k) {
     MP.DEFAULT_SETTINGS[k] = MP.OPTIONS[k].def;
   });
@@ -59,7 +61,24 @@
     });
     out.zdeck = MP.validDeck(out.stage, out.zdeck, out.zombiePool);
     if (out.coopLevel !== 'map' && !MP.findLevel(out.coopLevel)) out.coopLevel = 'map';
+    out.maxPlayers = Math.max(2, Math.min(4, Math.round(Number(out.maxPlayers) || 4)));
+    var sides = {};
+    Object.keys(out.sides && typeof out.sides === 'object' ? out.sides : {}).forEach(function (k) {
+      var n = Number(k);
+      if (n >= 1 && n <= 3 && (out.sides[k] === 'plants' || out.sides[k] === 'zombies')) sides[n] = out.sides[k];
+    });
+    out.sides = sides;
     return out;
+  };
+
+  // Versus side of a player (slot 0 = host). Guests without a side yet face
+  // the host.
+  MP.sideOf = function (settings, slot) {
+    if (!settings || settings.mode !== 'versus') return 'plants';
+    if (!slot) return settings.hostSide === 'zombies' ? 'zombies' : 'plants';
+    var side = settings.sides && settings.sides[slot];
+    if (side === 'plants' || side === 'zombies') return side;
+    return settings.hostSide === 'plants' ? 'zombies' : 'plants';
   };
 
   /* ============================================================== arenas */
@@ -305,12 +324,17 @@
   var KEY_CARDS = { '1': 0, '2': 1, '3': 2, '4': 3, q: 4, w: 5, e: 6, r: 7 };
   var KEY_ZCARDS = { '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, '6': 5, q: 0, w: 1, e: 2, r: 3, t: 4, y: 5 };
 
+  function bump(map, slot, n) {
+    map[slot] = (map[slot] || 0) + (n == null ? 1 : n);
+  }
+
   /*
-   * PlantSeat: the remote (guest) player using the plant side through the
-   * game's own planting/shovel/plant food code paths. The host plays plants
-   * with the game's native input, so a PlantSeat is only ever remote.
+   * PlantSeat: one remote (guest) player on the plant side, using the game's
+   * own planting/shovel/plant food code paths. The host plays plants with
+   * the game's native input, so a PlantSeat is only ever remote.
    */
-  function PlantSeat(stats) {
+  function PlantSeat(slot, stats) {
+    this.slot = slot;
     this.sel = null; // {kind:'card'|'shovel'|'food', i}
     this.ui = null;
     this.stats = stats;
@@ -318,7 +342,7 @@
 
   PlantSeat.prototype.pointer = function (ui) {
     this.ui = ui;
-    G.setRemotePointer(ui);
+    G.setRemotePointer(this.slot, ui);
   };
 
   PlantSeat.prototype.cancel = function (silent) {
@@ -365,7 +389,7 @@
     var ok = false;
     if (this.sel.kind === 'card') {
       ok = G.p2PlacePlant(this.sel.i, cell);
-      if (ok) this.stats.planted[1]++;
+      if (ok) bump(this.stats.planted, this.slot);
     } else if (this.sel.kind === 'shovel') ok = G.p2Shovel(cell);
     else if (this.sel.kind === 'food') ok = G.p2PlantFood(cell);
     if (ok) this.sel = null;
@@ -382,7 +406,7 @@
   PlantSeat.prototype.frame = function () {
     if (!G.inLevel() || G.levelOver()) {
       this.sel = null;
-      if (!G.inLevel()) G.setRemotePointer(null);
+      if (!G.inLevel()) G.setRemotePointer(this.slot, null);
     }
   };
 
@@ -391,11 +415,16 @@
     return { sel: this.sel, cell: cell };
   };
 
+  PlantSeat.prototype.dispose = function () {
+    G.setRemotePointer(this.slot, null);
+  };
+
   /*
-   * ZombieSeat: the zombie side of Versus. Uses the sandbox zombie packet bar
-   * and brains as currency. Can be driven by the host (local) or the guest.
+   * ZombieTeam: the zombie side of Versus. One shared deck (the sandbox
+   * zombie packet bar), brain bank and recharge timers; every zombie player
+   * (host and/or guests) has their own selected packet and pointer.
    */
-  function ZombieSeat(settings, stats) {
+  function ZombieTeam(settings, stats) {
     var cdMult = Number(settings.zombieCooldown) || 1;
     this.deck = MP.validDeck(settings.stage, settings.zdeck, settings.zombiePool)
       .filter(G.zombieExists)
@@ -408,15 +437,25 @@
     });
     this.rate = Number(settings.brainRate) || 1;
     this.brains = Number(settings.startBrains) || 200;
-    this.income = 8 * this.rate; // brains per second, grows over time
+    this.size = 1; // players on the team: income grows a bit with it
+    this.income = 8 * this.rate;
     this.elapsed = 0;
-    this.sel = null;
-    this.ui = null;
+    this.players = {}; // slot -> {sel, ui}
     this.stats = stats;
     this.bar = null;
   }
 
-  ZombieSeat.prototype.mount = function () {
+  ZombieTeam.prototype.join = function (slot) {
+    if (!this.players[slot]) this.players[slot] = { sel: null, ui: null };
+    this.size = Object.keys(this.players).length;
+  };
+
+  ZombieTeam.prototype.leave = function (slot) {
+    delete this.players[slot];
+    this.size = Math.max(1, Object.keys(this.players).length);
+  };
+
+  ZombieTeam.prototype.mount = function () {
     var self = this;
     return G.mountZombieBar(
       this.deck.map(function (d) {
@@ -435,14 +474,16 @@
     });
   };
 
-  ZombieSeat.prototype.canUse = function (j) {
+  ZombieTeam.prototype.canUse = function (j) {
     var d = this.deck[j];
     return !!d && this.cds[j] <= 0 && this.brains >= d.cost;
   };
 
-  ZombieSeat.prototype.select = function (j) {
-    if (this.sel && this.sel.i === j) {
-      this.sel = null;
+  ZombieTeam.prototype.select = function (slot, j) {
+    var p = this.players[slot];
+    if (!p) return;
+    if (p.sel && p.sel.i === j) {
+      p.sel = null;
       G.play('playCardCancel');
       return;
     }
@@ -450,67 +491,80 @@
       G.play('playCardChooseFailed');
       return;
     }
-    this.sel = { kind: 'zcard', i: j };
+    p.sel = { kind: 'zcard', i: j };
     G.play('playCardChosen');
   };
 
-  ZombieSeat.prototype.pointer = function (ui) {
-    this.ui = ui;
+  ZombieTeam.prototype.pointer = function (slot, ui) {
+    if (this.players[slot]) this.players[slot].ui = ui;
   };
 
-  ZombieSeat.prototype.down = function (ui, button) {
-    if (!G.gameStarted() || G.levelOver() || G.isPaused()) return;
-    this.ui = ui;
+  ZombieTeam.prototype.down = function (slot, ui, button) {
+    var p = this.players[slot];
+    if (!p || !G.gameStarted() || G.levelOver() || G.isPaused()) return;
+    p.ui = ui;
     if (button === 2) {
-      if (this.sel) {
-        this.sel = null;
+      if (p.sel) {
+        p.sel = null;
         G.play('playRightButtonCancel');
       }
       return;
     }
     var j = G.hitZombieCard(ui);
-    if (j >= 0) return this.select(j);
-    if (!this.sel) return;
+    if (j >= 0) return this.select(slot, j);
+    if (!p.sel) return;
     var lane = G.laneAt(ui);
     if (lane < 0) return;
-    this.spawn(this.sel.i, lane);
+    this.spawn(slot, p.sel.i, lane);
   };
 
-  ZombieSeat.prototype.spawn = function (j, lane) {
+  ZombieTeam.prototype.spawn = function (slot, j, lane) {
     var d = this.deck[j];
+    var p = this.players[slot];
     if (!this.canUse(j)) {
       G.play('playCardChooseFailed');
-      this.sel = null;
+      if (p) p.sel = null;
       return;
     }
     this.brains -= d.cost;
     this.cds[j] = d.cd;
-    this.sel = null;
-    this.stats.sent++;
-    this.stats.brains += d.cost;
+    if (p) p.sel = null;
+    bump(this.stats.sent, slot);
+    bump(this.stats.brains, slot, d.cost);
     G.play('playPlantOnFloor');
     G.spawnZombie(lane, d.type);
   };
 
-  ZombieSeat.prototype.key = function (k) {
+  ZombieTeam.prototype.key = function (slot, k) {
+    var p = this.players[slot];
+    if (!p) return;
     if (k === 'escape') {
-      this.sel = null;
+      p.sel = null;
       return;
     }
-    if (KEY_ZCARDS[k] != null && this.deck[KEY_ZCARDS[k]]) this.select(KEY_ZCARDS[k]);
+    if (KEY_ZCARDS[k] != null && this.deck[KEY_ZCARDS[k]]) this.select(slot, KEY_ZCARDS[k]);
   };
 
-  ZombieSeat.prototype.frame = function (dt) {
+  ZombieTeam.prototype.frame = function (dt) {
     if (!G.gameStarted() || G.levelOver() || G.isPaused()) return;
+    var self = this;
     this.elapsed += dt;
-    this.income = (8 + Math.floor(this.elapsed / 60) * 1.5) * this.rate;
-    this.brains = Math.min(3000, this.brains + this.income * dt);
+    // A bigger team earns more, but less than proportionally.
+    var teamBoost = 1 + (this.size - 1) * 0.5;
+    this.income = (8 + Math.floor(this.elapsed / 60) * 1.5) * this.rate * teamBoost;
+    this.brains = Math.min(3000 * teamBoost, this.brains + this.income * dt);
     for (var i = 0; i < this.cds.length; i++) if (this.cds[i] > 0) this.cds[i] = Math.max(0, this.cds[i] - dt);
-    if (this.sel && !this.canUse(this.sel.i)) this.sel = null;
+    var slots = Object.keys(this.players);
+    slots.forEach(function (s) {
+      var p = self.players[s];
+      if (p.sel && !self.canUse(p.sel.i)) p.sel = null;
+    });
     var sb = this.bar;
     if (G.isValid(sb)) {
-      var self = this;
-      sb.index = this.sel ? this.sel.i : -1;
+      // The bar's own highlight shows the host's pick (or the only zombie
+      // player's); everyone's picks are drawn on the overlays.
+      var shown = this.players[0] || (slots.length === 1 ? this.players[slots[0]] : null);
+      sb.index = shown && shown.sel ? shown.sel.i : -1;
       sb.zombieCards.forEach(function (card, i) {
         if (!self.deck[i]) return;
         card.ca.affordable = self.brains >= self.deck[i].cost;
@@ -519,11 +573,14 @@
     }
   };
 
-  ZombieSeat.prototype.state = function () {
+  ZombieTeam.prototype.playerState = function (slot) {
+    var p = this.players[slot];
+    return { sel: p ? p.sel : null, lane: p && p.sel && p.ui ? G.laneAt(p.ui) : -1 };
+  };
+
+  ZombieTeam.prototype.state = function () {
     var self = this;
     return {
-      sel: this.sel,
-      lane: this.sel && this.ui ? G.laneAt(this.ui) : -1,
       brains: this.brains,
       income: this.income,
       cd: this.cds.map(function (c, i) {
@@ -614,24 +671,47 @@
 
   /* ================================================================ match */
 
-  function Match(app, settings) {
+  function emptyRun() {
+    return { phase: 'loading', result: null, wave: 0, time: 0, planted: 0 };
+  }
+
+  function cleanRun(state) {
+    state = state || {};
+    return {
+      phase: state.phase === 'done' ? 'done' : state.phase === 'playing' ? 'playing' : 'loading',
+      result: state.result === 'won' ? 'won' : state.result === 'lost' ? 'lost' : null,
+      wave: Math.max(0, Number(state.wave) || 0),
+      time: Math.max(0, Number(state.time) || 0),
+      planted: Math.max(0, Number(state.planted) || 0),
+    };
+  }
+
+  /*
+   * Match: the host's side of a running match for up to 4 players (slot 0 is
+   * the host). `roster` is [{slot, name}] of the players in the room.
+   */
+  function Match(app, settings, roster) {
     this.app = app;
     this.settings = MP.normalizeSettings(settings);
     this.mode = this.settings.mode;
     this.phase = 'loading'; // loading -> playing -> over
-    this.stats = { planted: [0, 0], sent: 0, brains: 0, time: 0, wave: 0 };
-    this.plantSeat = null;
-    this.zombieSeat = null;
+    this.stats = { planted: {}, sent: {}, brains: {}, time: 0 };
+    this.players = {}; // slot -> {slot, name, seat, left}
+    this.seats = {}; // slot -> PlantSeat (guests on the plant side)
+    this.zombies = this.mode === 'versus' ? new ZombieTeam(this.settings, this.stats) : null;
     this.run = null; // survival: our own lawn
-    this.partner = null; // survival: the guest's lawn, as reported by the guest
+    this.runs = {}; // survival: slot -> run state (guests report theirs)
     this.timeLeft = (Number(this.settings.duration) || 5) * 60;
     this.warned30 = false;
     this.sceneReady = false;
     this.sawIdle = false;
     this.coopLevel = this.mode === 'coop' ? MP.findLevel(this.settings.coopLevel) : null;
     var self = this;
+    (roster || [{ slot: 0, name: '' }]).forEach(function (p) {
+      self.addPlayer(p.slot, p.name, true);
+    });
     this._onLocalPlant = function () {
-      self.stats.planted[0]++;
+      bump(self.stats.planted, 0);
     };
     this._onScene = function (name) {
       // Co-op on the game map: the host roams freely. A picked level ends
@@ -651,11 +731,64 @@
     G.on('scene', this._onScene);
   }
 
-  // Which side the guest plays.
-  Match.prototype.guestSeat = function () {
-    if (this.mode === 'survival') return 'own';
-    if (this.mode !== 'versus') return 'plants';
-    return this.settings.hostSide === 'plants' ? 'zombies' : 'plants';
+  // What a player does in this match: 'plants' | 'zombies' | 'own' (own
+  // Survival lawn) | 'spectator' (joined a Survival match already running).
+  Match.prototype.seatOf = function (slot) {
+    var p = this.players[slot];
+    if (this.mode === 'survival') return p && p.late ? 'spectator' : 'own';
+    if (this.mode === 'versus') return MP.sideOf(this.settings, slot);
+    return 'plants';
+  };
+  Match.prototype.guestSeat = Match.prototype.seatOf;
+
+  Match.prototype.addPlayer = function (slot, name, initial) {
+    var p = this.players[slot];
+    if (p && !p.left) {
+      p.name = name || p.name;
+      return;
+    }
+    p = this.players[slot] = { slot: slot, name: name || '', left: false, late: !initial && this.mode === 'survival' };
+    var seat = this.seatOf(slot);
+    if (slot > 0 && seat === 'plants') this.seats[slot] = new PlantSeat(slot, this.stats);
+    if (this.zombies && seat === 'zombies') this.zombies.join(slot);
+    if (seat === 'own' && slot > 0) this.runs[slot] = emptyRun();
+  };
+
+  Match.prototype.removePlayer = function (slot) {
+    var p = this.players[slot];
+    if (!p || p.left) return;
+    p.left = true;
+    if (this.seats[slot]) {
+      this.seats[slot].dispose();
+      delete this.seats[slot];
+    }
+    if (this.zombies) this.zombies.leave(slot);
+    if (this.phase === 'over') return;
+    if (this.mode === 'versus') {
+      // A side with nobody left loses by forfeit.
+      var self = this;
+      var left = { plants: 0, zombies: 0 };
+      Object.keys(this.players).forEach(function (s) {
+        var q = self.players[s];
+        if (!q.left) left[self.seatOf(q.slot)]++;
+      });
+      if (!left.plants || !left.zombies) {
+        G.freezeLevel();
+        this.finish({ winner: left.plants ? 'plants' : 'zombies', forfeit: true });
+      }
+    } else if (this.mode === 'survival' && this.runs[slot] && this.runs[slot].phase !== 'done') {
+      // Their run ends where it was.
+      this.runs[slot] = Object.assign({}, this.runs[slot], { phase: 'done', result: 'lost' });
+    }
+  };
+
+  Match.prototype.activeSlots = function () {
+    var self = this;
+    return Object.keys(this.players)
+      .map(Number)
+      .filter(function (s) {
+        return !self.players[s].left;
+      });
   };
 
   Match.prototype.start = function () {
@@ -666,12 +799,9 @@
       this.run = new SoloRun(s, function () {
         app.sendHud(true);
       });
-      this.partner = { phase: 'loading', result: null, wave: 0, time: 0, planted: 0 };
       return this.run.start();
     }
-    this.plantSeat = this.guestSeat() === 'plants' ? new PlantSeat(this.stats) : null;
     if (this.mode === 'versus') {
-      this.zombieSeat = new ZombieSeat(s, this.stats);
       G.hooks.blockLocalPlantInput = s.hostSide === 'zombies';
       return G.startCustomLevel(MP.buildLevel.versus(s));
     }
@@ -685,75 +815,82 @@
     this.sawIdle = false;
     this.warned30 = false;
     this.timeLeft = (Number(this.settings.duration) || 5) * 60;
-    this.stats.sent = 0;
-    this.stats.brains = 0;
+    this.stats.planted = {};
+    this.stats.sent = {};
+    this.stats.brains = {};
     this.stats.time = 0;
-    this.stats.wave = 0;
-    this.stats.planted = [0, 0];
-    if (this.plantSeat) this.plantSeat.sel = null;
-    if (this.zombieSeat) this.zombieSeat = new ZombieSeat(this.settings, this.stats);
-  };
-
-  Match.prototype.remoteSeat = function () {
-    if (this.mode === 'survival') return null;
-    return this.guestSeat() === 'plants' ? this.plantSeat : this.zombieSeat;
+    var self = this;
+    Object.keys(this.seats).forEach(function (s) {
+      self.seats[s].sel = null;
+    });
+    if (this.zombies) {
+      var team = new ZombieTeam(this.settings, this.stats);
+      Object.keys(this.zombies.players).forEach(function (s) {
+        team.join(Number(s));
+      });
+      this.zombies = team;
+    }
   };
 
   Match.prototype.localZombies = function () {
     return this.mode === 'versus' && this.settings.hostSide === 'zombies';
   };
 
-  // The native seed chooser is open and the guest is (also) picking plants.
-  Match.prototype.guestPicksSeeds = function () {
-    if (!G.inLevel() || !G.seedChooserOpen()) return false;
-    return this.mode === 'coop' || (this.mode === 'versus' && this.guestSeat() === 'plants');
+  // The native seed chooser is open and this guest may use it.
+  Match.prototype.guestPicksSeeds = function (slot) {
+    if (this.mode === 'survival' || !G.inLevel() || !G.seedChooserOpen()) return false;
+    return this.seatOf(slot) === 'plants' && !!this.seats[slot];
   };
 
-  // Only the guest may use the chooser (Versus with the guest on plants).
+  // Only guests use the chooser (Versus with the host on the zombie side).
   Match.prototype.guestOwnsChooser = function () {
-    return this.mode === 'versus' && this.guestSeat() === 'plants' && G.inLevel() && G.seedChooserOpen();
+    if (this.mode !== 'versus' || this.settings.hostSide !== 'zombies' || !G.inLevel() || !G.seedChooserOpen()) return false;
+    return Object.keys(this.seats).length > 0;
   };
 
-  Match.prototype.remotePointer = function (ui, norm) {
-    if (this.guestPicksSeeds() && norm) G.injectPointer('move', norm.x, norm.y, 0);
-    var seat = this.remoteSeat();
-    if (seat) seat.pointer(ui);
-    else if (this.mode !== 'survival') G.setRemotePointer(ui);
+  Match.prototype.remotePointer = function (slot, ui, norm) {
+    if (this.guestPicksSeeds(slot) && norm) G.injectPointer('move', norm.x, norm.y, 0);
+    var seat = this.seatOf(slot);
+    if (this.seats[slot]) this.seats[slot].pointer(ui);
+    else if (seat === 'zombies' && this.zombies) this.zombies.pointer(slot, ui);
   };
 
-  Match.prototype.remoteDown = function (ui, button, norm) {
+  Match.prototype.remoteDown = function (slot, ui, button, norm) {
     if (this.phase === 'over' || this.mode === 'survival') return;
-    if (this.guestPicksSeeds() && norm) {
+    if (this.guestPicksSeeds(slot) && norm) {
       G.injectPointer('down', norm.x, norm.y, button);
       G.injectPointer('up', norm.x, norm.y, button);
       return;
     }
-    var seat = this.remoteSeat();
-    if (seat) seat.down(ui, button);
+    if (this.seats[slot]) this.seats[slot].down(ui, button);
+    else if (this.zombies && this.seatOf(slot) === 'zombies' && this.phase === 'playing') this.zombies.down(slot, ui, button);
   };
 
-  Match.prototype.remoteKey = function (k) {
+  Match.prototype.remoteKey = function (slot, k) {
     if (this.phase === 'over') return;
-    var seat = this.remoteSeat();
-    if (seat) seat.key(k);
+    if (this.seats[slot]) this.seats[slot].key(k);
+    else if (this.zombies && this.seatOf(slot) === 'zombies' && this.phase === 'playing') this.zombies.key(slot, k);
   };
 
   Match.prototype.localDown = function (ui, button) {
-    if (this.localZombies() && this.zombieSeat && this.phase === 'playing') this.zombieSeat.down(ui, button);
+    if (this.localZombies() && this.phase === 'playing') this.zombies.down(0, ui, button);
   };
   Match.prototype.localPointer = function (ui) {
-    if (this.localZombies() && this.zombieSeat) this.zombieSeat.pointer(ui);
+    if (this.localZombies()) this.zombies.pointer(0, ui);
   };
   Match.prototype.localKey = function (k) {
-    if (this.localZombies() && this.zombieSeat && this.phase === 'playing') {
-      this.zombieSeat.key(k);
+    if (this.localZombies() && this.phase === 'playing') {
+      this.zombies.key(0, k);
       return true;
     }
     return false;
   };
 
   Match.prototype.frame = function (dt) {
-    if (this.plantSeat) this.plantSeat.frame(dt);
+    var self = this;
+    Object.keys(this.seats).forEach(function (s) {
+      self.seats[s].frame(dt);
+    });
     if (this.mode === 'coop') return;
     if (this.mode === 'survival') return this.frameSurvival(dt);
     if (!G.inLevel()) return;
@@ -767,21 +904,22 @@
       if (!this.sawIdle) return;
       this.phase = 'playing';
       G.lockGameSpeed();
-      this.zombieSeat.mount();
-      this.app.toastBoth(null, null, 'good', {
-        host: this.settings.hostSide === 'plants' ? 'versus_plants_goal' : 'versus_zombies_goal',
-        guest: this.guestSeat() === 'plants' ? 'versus_plants_goal' : 'versus_zombies_goal',
-      });
+      this.zombies.mount();
+      this.app.toastAll(function (slot) {
+        return { key: self.seatOf(slot) === 'zombies' ? 'versus_zombies_goal' : 'versus_plants_goal' };
+      }, 'good');
     }
     if (this.phase !== 'playing') return;
     var paused = G.isPaused();
     if (!paused) this.stats.time += dt;
-    this.zombieSeat.frame(paused ? 0 : dt);
+    this.zombies.frame(paused ? 0 : dt);
     if (lp.gameLost) return this.finish({ winner: 'zombies' });
     if (!paused) this.timeLeft -= dt;
     if (!this.warned30 && this.timeLeft <= 30) {
       this.warned30 = true;
-      this.app.toastBoth('last_30', null, 'warn');
+      this.app.toastAll(function () {
+        return { key: 'last_30' };
+      }, 'warn');
     }
     if (this.timeLeft <= 0) {
       this.timeLeft = 0;
@@ -790,37 +928,69 @@
     }
   };
 
-  Match.prototype.frameSurvival = function (dt) {
-    this.run.frame(dt);
-    var mine = this.run.state();
-    var other = this.partner;
-    if (this.phase === 'loading' && (mine.phase !== 'loading' || other.phase !== 'loading')) this.phase = 'playing';
-    if (this.phase !== 'playing') return;
-    if (mine.phase === 'done' && !this._toldDone) {
-      this._toldDone = true;
-      if (other.phase !== 'done') this.app.onLocalRunDone(mine);
-    }
-    if (mine.phase === 'done' && other.phase === 'done') {
-      this.finish({ players: [mine, other] });
-    }
+  Match.prototype.runStates = function () {
+    var out = {};
+    if (this.run) out[0] = this.run.state();
+    var self = this;
+    Object.keys(this.runs).forEach(function (s) {
+      out[s] = self.runs[s];
+    });
+    return out;
   };
 
-  Match.prototype.partnerUpdate = function (state) {
-    if (!this.partner || !state) return;
-    this.partner = {
-      phase: state.phase === 'done' ? 'done' : state.phase === 'playing' ? 'playing' : 'loading',
-      result: state.result === 'won' ? 'won' : state.result === 'lost' ? 'lost' : null,
-      wave: Math.max(0, Number(state.wave) || 0),
-      time: Math.max(0, Number(state.time) || 0),
-      planted: Math.max(0, Number(state.planted) || 0),
-    };
+  Match.prototype.frameSurvival = function (dt) {
+    this.run.frame(dt);
+    var runs = this.runStates();
+    var slots = Object.keys(runs);
+    var mine = runs[0];
+    if (
+      this.phase === 'loading' &&
+      slots.some(function (s) {
+        return runs[s].phase !== 'loading';
+      })
+    )
+      this.phase = 'playing';
+    if (this.phase !== 'playing') return;
+    var allDone = slots.every(function (s) {
+      return runs[s].phase === 'done';
+    });
+    if (mine.phase === 'done' && !this._toldDone) {
+      this._toldDone = true;
+      if (!allDone) this.app.onLocalRunDone(mine);
+    }
+    if (allDone) this.finish({});
+  };
+
+  Match.prototype.partnerUpdate = function (slot, state) {
+    if (!this.runs[slot] || !state) return;
+    this.runs[slot] = cleanRun(state);
   };
 
   Match.prototype.finish = function (outcome) {
     if (this.phase === 'over') return;
     this.phase = 'over';
-    if (this.plantSeat) this.plantSeat.sel = null;
-    if (this.zombieSeat) this.zombieSeat.sel = null;
+    var self = this;
+    Object.keys(this.seats).forEach(function (s) {
+      self.seats[s].sel = null;
+    });
+    if (this.zombies) {
+      Object.keys(this.zombies.players).forEach(function (s) {
+        self.zombies.players[s].sel = null;
+      });
+    }
+    var runs = this.mode === 'survival' ? this.runStates() : null;
+    var players = Object.keys(this.players)
+      .map(Number)
+      .sort()
+      .filter(function (s) {
+        return self.seatOf(s) !== 'spectator';
+      })
+      .map(function (s) {
+        var p = self.players[s];
+        var out = { slot: s, name: p.name, left: p.left, side: self.mode === 'versus' ? self.seatOf(s) : 'plants' };
+        if (runs) out.run = runs[s] || emptyRun();
+        return out;
+      });
     var result = Object.assign(
       {
         mode: this.mode,
@@ -828,6 +998,7 @@
         hostSide: this.settings.hostSide,
         waveTotal: Number(this.settings.waves) || 0,
         stats: JSON.parse(JSON.stringify(this.stats)),
+        players: players,
       },
       outcome,
     );
@@ -840,54 +1011,65 @@
     );
   };
 
-  Match.prototype.forfeit = function () {
-    if (this.phase === 'over') return false;
-    if (this.mode === 'versus') {
-      G.freezeLevel();
-      this.finish({ winner: this.settings.hostSide, forfeit: true });
-      return true;
-    }
-    if (this.mode === 'survival' && this.partner) {
-      // The guest left: their run ends where it was.
-      if (this.partner.phase !== 'done') this.partner = Object.assign({}, this.partner, { phase: 'done', result: 'lost' });
-    }
-    return false;
-  };
-
-  // State mirrored to the guest (and used for the host's own overlay).
-  Match.prototype.hud = function () {
-    var out = { mode: this.mode, phase: this.phase, seat: this.guestSeat(), paused: G.isPaused(), loading: G.loadingState() };
-    if (this.plantSeat) {
-      var ps = this.plantSeat.state();
+  // HUD state sent to one guest (and parts of it reused by the host).
+  Match.prototype.hud = function (slot) {
+    var seat = this.seatOf(slot);
+    var out = { mode: this.mode, phase: this.phase, seat: seat, paused: G.isPaused(), loading: G.loadingState() };
+    if (this.seats[slot]) {
+      var ps = this.seats[slot].state();
       out.sel = ps.sel;
       out.cell = ps.cell;
     }
-    if (this.zombieSeat) {
-      var zs = this.zombieSeat.state();
+    if (this.zombies) {
+      var zs = this.zombies.state();
       out.brains = zs.brains;
       out.income = zs.income;
       out.cd = zs.cd;
       out.timeLeft = this.timeLeft;
-      if (this.guestSeat() === 'zombies') {
-        out.sel = zs.sel;
-        out.lane = zs.lane;
-      } else {
-        out.hostSel = zs.sel;
-        out.hostLane = zs.lane;
+      if (seat === 'zombies') {
+        var zp = this.zombies.playerState(slot);
+        out.sel = zp.sel;
+        out.lane = zp.lane;
       }
     }
-    if (this.mode !== 'survival') out.chooser = this.guestPicksSeeds();
-    if (this.run) {
-      out.run = this.run.state();
+    if (this.mode !== 'survival') out.chooser = this.guestPicksSeeds(slot);
+    else {
+      out.runs = this.runStates();
       out.waveTotal = Number(this.settings.waves) || 0;
     }
     return out;
   };
 
+  // Everyone's picks, for the host's own overlay.
+  Match.prototype.overlay = function () {
+    var self = this;
+    var out = { mode: this.mode, phase: this.phase, picks: [] };
+    Object.keys(this.seats).forEach(function (s) {
+      var st = self.seats[s].state();
+      if (st.sel) out.picks.push({ slot: Number(s), sel: st.sel, cell: st.cell });
+    });
+    if (this.zombies) {
+      var zs = this.zombies.state();
+      out.brains = zs.brains;
+      out.income = zs.income;
+      out.cd = zs.cd;
+      out.timeLeft = this.timeLeft;
+      Object.keys(this.zombies.players).forEach(function (s) {
+        var zp = self.zombies.playerState(Number(s));
+        if (zp.sel) out.picks.push({ slot: Number(s), sel: zp.sel, lane: zp.lane });
+      });
+    }
+    return out;
+  };
+
   Match.prototype.dispose = function () {
+    var self = this;
     G.off('local-planted', this._onLocalPlant);
     G.off('scene', this._onScene);
     if (this.run) this.run.dispose();
+    Object.keys(this.seats).forEach(function (s) {
+      self.seats[s].dispose();
+    });
     G.setRemotePointer(null);
     G.hooks.blockLocalPlantInput = false;
     G.hooks.managedZombieBar = false;
@@ -899,73 +1081,106 @@
 
   /* ======================================================= result screen */
 
-  // Turns a host-side result into texts for the given perspective.
-  MP.describeResult = function (r, role, names) {
-    var out = { win: false, title: '', sub: '', headers: [names[0], names[1]], stats: [] };
+  function runText(x) {
+    return x && x.result === 'won' ? t('survived') : t('fell');
+  }
+
+  // Turns a host-side result into texts for the player in `mySlot`.
+  MP.describeResult = function (r, mySlot) {
+    var players = r.players || [];
+    var me = players.find(function (p) {
+      return p.slot === mySlot;
+    });
+    var out = {
+      win: false,
+      title: '',
+      sub: '',
+      headers: players.map(function (p) {
+        return p.name;
+      }),
+      slots: players.map(function (p) {
+        return p.slot;
+      }),
+      stats: [],
+    };
+    function row(label, fn) {
+      out.stats.push([label].concat(players.map(fn)));
+    }
     if (r.mode === 'versus') {
-      var s = r.stats;
-      var time = ' • ' + t('stat_time') + ' ' + MP.util.formatTime(s.time);
-      var mySide = role === 'host' ? r.hostSide : r.hostSide === 'plants' ? 'zombies' : 'plants';
-      out.win = r.winner === mySide;
-      out.title = out.win ? t('result_victory') : t('result_defeat');
+      var s = r.stats || {};
+      var time = ' • ' + t('stat_time') + ' ' + MP.util.formatTime(s.time || 0);
+      out.win = !!me && r.winner === me.side;
+      out.title = !me ? (r.winner === 'plants' ? t('result_plants_win') : t('result_zombies_win')) : out.win ? t('result_victory') : t('result_defeat');
       out.sub = (r.winner === 'plants' ? t('result_plants_win') : t('result_zombies_win')) + time;
       if (r.forfeit) out.sub = t('result_forfeit') + time;
-      var plantsIdx = r.hostSide === 'plants' ? 0 : 1;
-      var row = [t('stat_planted'), '', ''];
-      row[1 + plantsIdx] = s.planted[0] + s.planted[1];
-      out.stats.push(row);
-      var zrow = [t('stat_zombies_sent'), '', ''];
-      zrow[2 - plantsIdx] = s.sent;
-      out.stats.push(zrow);
-      var brow = [t('stat_brains_spent'), '', ''];
-      brow[2 - plantsIdx] = s.brains;
-      out.stats.push(brow);
+      row(t('stat_side'), function (p) {
+        return p.side === 'zombies' ? t('side_zombies') : t('side_plants');
+      });
+      row(t('stat_planted'), function (p) {
+        return p.side === 'plants' ? (s.planted && s.planted[p.slot]) || 0 : '';
+      });
+      row(t('stat_zombies_sent'), function (p) {
+        return p.side === 'zombies' ? (s.sent && s.sent[p.slot]) || 0 : '';
+      });
+      row(t('stat_brains_spent'), function (p) {
+        return p.side === 'zombies' ? Math.round((s.brains && s.brains[p.slot]) || 0) : '';
+      });
       return out;
     }
-    // survival: [host run, guest run]
-    var p = r.players || [];
-    var a = p[0] || {};
-    var b = p[1] || {};
-    var mine = role === 'host' ? a : b;
-    var both = a.result === 'won' && b.result === 'won';
-    out.win = mine.result === 'won';
-    out.title = both ? t('result_survived') : out.win ? t('result_victory') : t('result_overrun');
-    var best = (a.wave || 0) >= (b.wave || 0) ? 0 : 1;
-    out.sub = t('best_wave', { name: names[best], n: Math.max(a.wave || 0, b.wave || 0), total: r.waveTotal });
-    function res(x) {
-      return x.result === 'won' ? t('survived') : t('fell');
-    }
-    out.stats.push([t('stat_wave'), (a.wave || 0) + '/' + r.waveTotal, (b.wave || 0) + '/' + r.waveTotal]);
-    out.stats.push([t('stat_result'), res(a), res(b)]);
-    out.stats.push([t('stat_time'), MP.util.formatTime(a.time || 0), MP.util.formatTime(b.time || 0)]);
-    out.stats.push([t('stat_planted'), a.planted || 0, b.planted || 0]);
+    // survival
+    var total = r.waveTotal;
+    var mine = me && me.run;
+    var allWon =
+      players.length > 0 &&
+      players.every(function (p) {
+        return p.run && p.run.result === 'won';
+      });
+    var best = players.reduce(function (a, p) {
+      return !a || ((p.run && p.run.wave) || 0) > ((a.run && a.run.wave) || 0) ? p : a;
+    }, null);
+    out.win = !!mine && mine.result === 'won';
+    out.title = allWon ? t('result_survived') : out.win ? t('result_victory') : mine ? t('result_overrun') : t('result_survival_over');
+    if (best) out.sub = t('best_wave', { name: best.name, n: (best.run && best.run.wave) || 0, total: total });
+    row(t('stat_wave'), function (p) {
+      return ((p.run && p.run.wave) || 0) + '/' + total;
+    });
+    row(t('stat_result'), function (p) {
+      return runText(p.run);
+    });
+    row(t('stat_time'), function (p) {
+      return MP.util.formatTime((p.run && p.run.time) || 0);
+    });
+    row(t('stat_planted'), function (p) {
+      return (p.run && p.run.planted) || 0;
+    });
     return out;
   };
 
   // Summary sent to the server's match history.
-  MP.matchRecord = function (r, names) {
+  MP.matchRecord = function (r) {
+    var players = r.players || [];
     if (r.mode === 'versus') {
-      var hostWin = r.winner === r.hostSide;
       return {
         mode: 'versus',
         winner: r.winner,
-        duration: Math.round(r.stats.time),
+        duration: Math.round((r.stats && r.stats.time) || 0),
         waves: 0,
-        players: [
-          { name: names[0], side: r.hostSide, win: hostWin, score: 0 },
-          { name: names[1], side: r.hostSide === 'plants' ? 'zombies' : 'plants', win: !hostWin, score: 0 },
-        ],
+        players: players.map(function (p) {
+          return { slot: p.slot, name: p.name, side: p.side, win: p.side === r.winner, score: 0 };
+        }),
       };
     }
-    var p = r.players || [];
     return {
       mode: 'survival',
       winner: '',
-      duration: Math.round(Math.max((p[0] && p[0].time) || 0, (p[1] && p[1].time) || 0)),
+      duration: Math.round(
+        players.reduce(function (m, p) {
+          return Math.max(m, (p.run && p.run.time) || 0);
+        }, 0),
+      ),
       waves: r.waveTotal,
-      players: [0, 1].map(function (i) {
-        var x = p[i] || {};
-        return { name: names[i], side: 'plants', win: x.result === 'won', score: x.wave || 0 };
+      players: players.map(function (p) {
+        return { slot: p.slot, name: p.name, side: 'plants', win: !!p.run && p.run.result === 'won', score: (p.run && p.run.wave) || 0 };
       }),
     };
   };

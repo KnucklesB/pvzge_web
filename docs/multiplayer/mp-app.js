@@ -4,10 +4,12 @@
  * Glues the network session, the lobby (with the online tabs: public rooms,
  * match history and account), the match controllers and the overlays.
  *
+ *  - Up to 4 players: the host (slot 0) and up to 3 guests (slots 1-3).
  *  - Co-op / Versus share one lawn: the host runs the real game and streams
- *    it; the guest watches the stream, sends inputs and draws local feedback.
- *  - Survival gives each player their own lawn: both run the level locally
- *    and stream it to the other, shown as a picture-in-picture.
+ *    it; guests watch the stream, send inputs and draw local feedback.
+ *  - Survival gives each player their own lawn: everyone runs the level
+ *    locally and streams it to the host, who relays the lawn each player
+ *    wants to watch (picture-in-picture).
  */
 (function () {
   'use strict';
@@ -43,8 +45,13 @@
     localPtr: null,
     ghost: null,
     guestRun: null,
+    mySlot: 0,
+    roster: [], // guest side: [{slot, name, account, ready, ping}] from the host
+    watchSlot: null, // survival: whose lawn the picture-in-picture shows
     // host side
-    remotePtr: null,
+    readyMap: {}, // slot -> ready (host)
+    remotePtrs: {}, // slot -> {x, y} normalized
+    hostPtr: null,
     roomKey: null,
     pendingJoinCode: null,
   });
@@ -59,9 +66,49 @@
 
   // Which side the local player controls in Versus.
   App.mySide = function () {
-    if (this.settings.mode !== 'versus') return 'plants';
-    var hs = this.settings.hostSide;
-    return this.role === 'host' ? hs : hs === 'plants' ? 'zombies' : 'plants';
+    return MP.sideOf(this.settings, this.role === 'host' ? 0 : this.mySlot);
+  };
+
+  // Everyone in the room, host first: [{slot, name, account, ready, ping}].
+  App.currentRoster = function () {
+    var s = this.session;
+    if (!s) return [];
+    if (this.role !== 'host') return this.roster;
+    var self = this;
+    return [{ slot: 0, name: s.localName, account: !!api.user(), ready: true, ping: null }].concat(
+      s.guests().map(function (g) {
+        return { slot: g.slot, name: g.name, account: !!(g.info && g.info.ticket), ready: !!self.readyMap[g.slot], ping: g.rtt };
+      }),
+    );
+  };
+
+  App.playerName = function (slot) {
+    var p = this.currentRoster().find(function (x) {
+      return x.slot === slot;
+    });
+    return p ? p.name : '';
+  };
+
+  // Versus: both sides need someone.
+  App.teamsValid = function () {
+    if (this.settings.mode !== 'versus') return true;
+    var self = this;
+    var count = { plants: 0, zombies: 0 };
+    this.currentRoster().forEach(function (p) {
+      count[MP.sideOf(self.settings, p.slot)]++;
+    });
+    return count.plants > 0 && count.zombies > 0;
+  };
+
+  // Puts a guest without a side on the smaller team (host decides).
+  App.assignSide = function (slot) {
+    if (this.role !== 'host' || !slot) return;
+    var self = this;
+    var count = { plants: 0, zombies: 0 };
+    this.currentRoster().forEach(function (p) {
+      if (p.slot !== slot) count[MP.sideOf(self.settings, p.slot)]++;
+    });
+    this.settings.sides[slot] = count.zombies < count.plants ? 'zombies' : count.plants < count.zombies ? 'plants' : this.settings.hostSide === 'plants' ? 'zombies' : 'plants';
   };
 
   App.lobbyState = function () {
@@ -87,26 +134,42 @@
     if (!s.code || (this.role === 'guest' && !s.connected)) {
       return { view: 'busy', busyText: this.role === 'host' ? 'creating' : 'connecting' };
     }
-    var players = [];
-    var guestConnected = s.connected;
-    if (this.role === 'host') {
-      players.push({ name: s.localName, role: 'host', you: true, account: !!api.user() });
-      players.push(guestConnected ? { name: s.remoteName, role: 'guest', ready: this.guestReady, account: !!(s.remoteInfo && s.remoteInfo.ticket) } : null);
-    } else {
-      players.push({ name: s.remoteName, role: 'host' });
-      players.push({ name: s.localName, role: 'guest', ready: this.guestReady, you: true, account: !!api.user() });
-    }
+    var self = this;
+    var me = this.role === 'host' ? 0 : this.mySlot;
+    var roster = this.currentRoster();
+    var players = roster.map(function (p) {
+      return {
+        slot: p.slot,
+        name: p.name,
+        role: p.slot === 0 ? 'host' : 'guest',
+        ready: p.ready,
+        you: p.slot === me,
+        account: p.account,
+        side: self.settings.mode === 'versus' ? MP.sideOf(self.settings, p.slot) : null,
+      };
+    });
+    while (players.length < this.settings.maxPlayers) players.push(null);
+    var guests = roster.filter(function (p) {
+      return p.slot > 0;
+    });
+    var allReady =
+      guests.length > 0 &&
+      guests.every(function (p) {
+        return p.ready;
+      });
     var status = '';
-    if (this.role === 'host') status = !guestConnected ? 'need_player' : !this.guestReady ? 'guest_must_ready' : '';
+    if (this.role === 'host') status = !guests.length ? 'need_player' : !allReady ? 'guests_must_ready' : !this.teamsValid() ? 'teams_invalid' : '';
     else status = this.guestReady ? 'waiting_host' : '';
     return {
       view: 'room',
       role: this.role,
+      mySlot: me,
       code: s.code,
       players: players,
+      playerCount: roster.length,
       settings: this.settings,
       ready: this.guestReady,
-      canStart: this.role === 'host' && guestConnected && this.guestReady,
+      canStart: this.role === 'host' && allReady && this.teamsValid(),
       canEditDeck: this.settings.mode === 'versus' && this.mySide() === 'zombies',
       mapLocked: this.role === 'host' && !G.mapUnlocked(),
       online: api.available(),
@@ -160,8 +223,17 @@
 
   App.broadcastLobby = function () {
     if (this.role !== 'host' || !this.session) return;
-    this.session.send({ t: 'lobby', settings: this.settings, guestReady: this.guestReady, phase: this.phase });
+    this.session.send({ t: 'lobby', settings: this.settings, roster: this.currentRoster(), phase: this.phase });
     this.publishRoom();
+  };
+
+  // Pings change all the time: refresh the others' player lists now and then.
+  App.broadcastRoster = function (force) {
+    if (this.role !== 'host' || !this.session) return;
+    var now = performance.now();
+    if (!force && now - (this._rosterAt || 0) < 2000) return;
+    this._rosterAt = now;
+    this.session.send({ t: 'roster', roster: this.currentRoster() });
   };
 
   App.setTab = function (tab) {
@@ -195,6 +267,8 @@
     this.phase = 'lobby';
     this.guestReady = false;
     this.roomKey = MP.util.randomCode(24);
+    this.readyMap = {};
+    this.settings.sides = {}; // teams are per room
     // A profile still in the tutorial has nothing to pick on the map.
     if (!G.mapUnlocked() && this.settings.coopLevel === 'map') this.settings.coopLevel = 'egypt:1';
     var s = (this.session = new MP.Session());
@@ -202,7 +276,7 @@
     bindSession(s);
     this.refreshLobby();
     var self = this;
-    s.host(name).then(
+    s.host(name, this.settings.maxPlayers).then(
       function () {
         if (self.session !== s) return;
         self.refreshLobby();
@@ -249,7 +323,8 @@
         function (welcome) {
           if (self.session !== s) return;
           if (welcome.settings) self.settings = MP.normalizeSettings(welcome.settings);
-          if (welcome.guestReady != null) self.guestReady = !!welcome.guestReady;
+          self.mySlot = s.slot;
+          self.roster = welcome.roster || [];
           self.refreshLobby();
           if (welcome.phase === 'match' && welcome.start) self.guestEnterMatch(welcome.start);
         },
@@ -289,9 +364,13 @@
     this.role = null;
     this.phase = 'idle';
     this.guestReady = false;
+    this.readyMap = {};
+    this.roster = [];
+    this.mySlot = 0;
+    this.watchSlot = null;
     this.hud = null;
     this.layout = null;
-    this.remotePtr = null;
+    this.remotePtrs = {};
     this.roomKey = null;
     UI.hidePip();
     UI.renderBadge(null);
@@ -302,15 +381,55 @@
   App.setting = function (key, value) {
     if (this.role !== 'host') return;
     if (key === 'quality' && this.session) this.session.applyQuality(value, G.canvas);
+    if (key === 'maxPlayers') {
+      // Never below the players already in the room.
+      value = Math.max(Number(value) || 4, this.currentRoster().length);
+      if (this.session) this.session.setMaxPlayers(value);
+    }
+    var oldHostSide = this.settings.hostSide;
     this.settings[key] = value;
     if (key === 'stage') this.settings.zdeck = MP.defaultDeck(value);
+    if (key === 'hostSide' && value !== oldHostSide && this.session) {
+      // 1 vs 1: switching sides swaps the guest too.
+      var guests = this.session.guests();
+      if (guests.length === 1) this.settings.sides[guests[0].slot] = value === 'plants' ? 'zombies' : 'plants';
+    }
     this.settings = MP.normalizeSettings(this.settings);
+    if (key === 'mode' && value === 'versus' && this.session) {
+      // Balance the teams for players who haven't picked a side.
+      var self = this;
+      this.session.guests().forEach(function (g) {
+        if (!self.settings.sides[g.slot]) self.assignSide(g.slot);
+      });
+    }
     MP.store.set('settings', this.settings);
     this.broadcastLobby();
     this.refreshLobby();
   };
 
-  // The zombie player picks their deck in the lobby.
+  // Versus teams: the host moves anyone; a guest moves only themselves.
+  App.setSide = function (slot, side) {
+    if (this.settings.mode !== 'versus' || this.phase !== 'lobby' || (side !== 'plants' && side !== 'zombies')) return;
+    if (this.role === 'host') {
+      if (slot === 0) return this.setting('hostSide', side);
+      this.settings.sides[slot] = side;
+      this.settings = MP.normalizeSettings(this.settings);
+      MP.store.set('settings', this.settings);
+      this.broadcastLobby();
+      this.refreshLobby();
+    } else if (this.session && slot === this.mySlot) {
+      this.session.send({ t: 'side', v: side });
+    }
+  };
+
+  App.kick = function (slot) {
+    if (this.role !== 'host' || !this.session || !slot) return;
+    var name = this.playerName(slot);
+    if (!window.confirm(t('kick_confirm', { name: name }))) return;
+    this.session.kick(slot);
+  };
+
+  // A zombie player picks the team's deck in the lobby.
   App.setDeck = function (deck) {
     if (this.settings.mode !== 'versus' || this.mySide() !== 'zombies') return;
     deck = MP.validDeck(this.settings.stage, deck, this.settings.zombiePool);
@@ -448,7 +567,8 @@
         host: s.localName,
         mode: this.settings.mode,
         stage: this.settings.stage,
-        players: s.connected ? 2 : 1,
+        players: 1 + s.guests().length,
+        max: this.settings.maxPlayers,
         status: this.phase === 'match' ? 'playing' : 'waiting',
         public: this.settings.public !== false,
       })
@@ -727,36 +847,40 @@
   /* ============================================================ session */
 
   function bindSession(s) {
-    s.on('peer-joined', function (p) {
+    s.on('peer-joined', function (link) {
       if (App.session !== s) return;
-      App.guestReady = false;
-      var payload = { settings: App.settings, phase: App.phase };
-      if (App.phase === 'match' && App.match) payload.start = App.startPayload();
-      s.welcome(payload);
-      UI.toast(t('player_joined', { name: p.name }), 'good');
+      var slot = link.slot;
+      App.readyMap[slot] = false;
+      if (App.settings.mode === 'versus' && !App.settings.sides[slot]) App.assignSide(slot);
+      if (App.match) App.match.addPlayer(slot, link.name, false);
+      var payload = { settings: App.settings, phase: App.phase, roster: App.currentRoster() };
+      if (App.phase === 'match' && App.match) payload.start = App.startPayload(slot);
+      s.welcome(link, payload);
+      App.toastAll(function () {
+        return { key: 'player_joined', vars: { name: link.name } };
+      }, 'good', slot);
       G.play('playCardChosen');
-      if (App.phase === 'match' && App.match) {
-        // Rejoin in the middle of a match: resume streaming right away.
-        App.startStream();
-      }
+      // Joined (or came back) in the middle of a match: stream right away.
+      if (App.phase === 'match' && App.match) s.streamTo(slot, App.settings.mode === 'survival' ? App.defaultWatch(slot) : 0, true);
+      App.broadcastLobby();
       App.refreshLobby();
       App.updateBadge();
-      App.publishRoom();
     });
-    s.on('peer-left', function (p) {
+    s.on('peer-left', function (link, reason) {
       if (App.session !== s) return;
       if (App.role === 'host') {
-        UI.toast(t('player_left', { name: p.name }), 'warn');
-        App.guestReady = false;
-        App.remotePtr = null;
-        G.setRemotePointer(null);
-        G.hooks.remoteChooser = false;
-        UI.hidePip();
-        // Versus can't go on alone: the remaining player wins by forfeit.
-        if (App.match) App.match.forfeit();
+        var slot = link.slot;
+        App.toastAll(function () {
+          return { key: reason === 'kicked' ? 'player_kicked' : 'player_left', vars: { name: link.name } };
+        }, 'warn');
+        delete App.readyMap[slot];
+        delete App.remotePtrs[slot];
+        G.setRemotePointer(slot, null);
+        if (App.match) App.match.removePlayer(slot);
+        if (App.watchSlot === slot) App.watch(1);
+        App.broadcastLobby();
         App.refreshLobby();
         App.updateBadge();
-        App.publishRoom();
       } else {
         var inMatch = App.phase === 'match';
         App.session = null;
@@ -765,7 +889,7 @@
         } catch (e) {}
         App.teardown();
         if (inMatch) App.guestExitMatch();
-        App.lobbyError = p.reason === 'bye' || p.reason === 'kicked' ? 'err_closed' : 'err_lost';
+        App.lobbyError = reason === 'kicked' ? 'err_kicked' : reason === 'bye' ? 'err_closed' : 'err_lost';
         UI.closeModal();
         if (G.sceneName() === 'mainScene') UI.openLobby(App.lobbyState());
         else G.goToMain();
@@ -773,43 +897,57 @@
     });
     s.on('rtt', function () {
       App.updateBadge();
+      App.broadcastRoster(false);
     });
-    s.on('stream', function (stream) {
-      if (App.settings.mode === 'survival') UI.showPip(stream);
-      else if (App.role === 'guest') UI.setViewStream(stream);
+    s.on('stream', function (stream, src) {
+      if (App.settings.mode === 'survival') {
+        if (App.role === 'host') {
+          // A guest's own lawn: show it if nothing (or that lawn) is shown.
+          if (App.watchSlot == null || App.watchSlot === src) App.showWatched(src, stream);
+        } else App.showWatched(src, stream);
+      } else if (App.role === 'guest') UI.setViewStream(stream);
     });
-    s.on('stream-ended', function () {
-      if (App.settings.mode === 'survival') UI.hidePip();
-      else if (App.role === 'guest' && App.phase === 'match') UI.setViewWaiting();
+    s.on('stream-ended', function (src) {
+      if (App.settings.mode === 'survival') {
+        if (App.watchSlot === src) {
+          if (App.role === 'host') App.watch(1);
+          else UI.setPipWaiting();
+        }
+      } else if (App.role === 'guest' && App.phase === 'match') UI.setViewWaiting();
     });
-    s.on('message', function (msg) {
+    s.on('message', function (msg, link) {
       if (App.session !== s) return;
-      if (App.role === 'host') App.onHostMessage(msg);
+      if (App.role === 'host') App.onHostMessage(msg, link);
       else App.onGuestMessage(msg);
     });
   }
 
   /* ========================================================= host side */
 
-  App.startPayload = function () {
-    var seat = this.match ? this.match.guestSeat() : 'plants';
-    return { settings: this.settings, seat: seat };
+  App.startPayload = function (slot) {
+    var seat = this.match ? this.match.seatOf(slot) : MP.sideOf(this.settings, slot);
+    return { settings: this.settings, seat: seat, roster: this.currentRoster() };
   };
 
   App.start = function () {
-    if (this.role !== 'host' || !this.session || !this.session.connected || !this.guestReady) return;
+    var st = this.lobbyState();
+    if (this.role !== 'host' || !st.canStart) return;
     this.startMatch();
   };
 
   App.startMatch = function () {
+    var self = this;
     UI.closeModal();
     UI.closeLobby();
     UI.hidePip();
     if (this.match) this.match.dispose();
     this.phase = 'match';
     this._toldChooser = false;
-    this.match = new MP.Match(this, this.settings);
-    this.session.send(Object.assign({ t: 'start' }, this.startPayload()));
+    this.watchSlot = null;
+    this.match = new MP.Match(this, this.settings, this.currentRoster());
+    this.session.guests().forEach(function (g) {
+      self.session.sendTo(g.slot, Object.assign({ t: 'start' }, self.startPayload(g.slot)));
+    });
     this.startStream(true);
     this.match.start();
     this.updateBadge();
@@ -825,21 +963,41 @@
   App.startStream = function (restart) {
     var s = this.session;
     if (!s || !s.connected) return;
-    if (restart || !s.call) s.startStream(G.canvas, this.settings.quality);
+    var self = this;
+    if (this.settings.mode === 'survival') {
+      // Each guest starts by watching the host's lawn.
+      s.guests().forEach(function (g) {
+        g.watch = self.defaultWatch(g.slot);
+      });
+    }
+    if (restart || !s._local) s.startStream(G.canvas, this.settings.quality);
   };
 
-  App.onHostMessage = function (msg) {
+  // Survival: the first lawn a player watches.
+  App.defaultWatch = function (slot) {
+    return slot === 0 ? (this.session && this.session.guests()[0] ? this.session.guests()[0].slot : null) : 0;
+  };
+
+  App.onHostMessage = function (msg, link) {
     var m = this.match;
+    var slot = link.slot;
     var norm, ui;
     switch (msg.t) {
       case 'ready':
-        this.guestReady = !!msg.v;
-        if (this.guestReady) UI.toast(t('player_ready', { name: this.session.remoteName }), 'good');
+        this.readyMap[slot] = !!msg.v;
+        if (this.readyMap[slot]) UI.toast(t('player_ready', { name: link.name }), 'good');
         this.broadcastLobby();
         this.refreshLobby();
         break;
+      case 'side':
+        if (this.phase === 'lobby' && this.settings.mode === 'versus' && (msg.v === 'plants' || msg.v === 'zombies')) {
+          this.settings.sides[slot] = msg.v;
+          this.broadcastLobby();
+          this.refreshLobby();
+        }
+        break;
       case 'zdeck':
-        if (this.settings.mode === 'versus' && this.settings.hostSide === 'plants' && this.phase === 'lobby') {
+        if (this.settings.mode === 'versus' && MP.sideOf(this.settings, slot) === 'zombies' && this.phase === 'lobby') {
           this.settings.zdeck = MP.validDeck(this.settings.stage, msg.deck, this.settings.zombiePool);
           this.broadcastLobby();
           this.refreshLobby();
@@ -847,104 +1005,141 @@
         break;
       case 'ptr':
         if (msg.x < 0) {
-          this.remotePtr = null;
-          G.setRemotePointer(null);
+          delete this.remotePtrs[slot];
+          G.setRemotePointer(slot, null);
           break;
         }
-        this.remotePtr = { x: msg.x, y: msg.y };
-        if (m && G.ready) m.remotePointer(G.normToUI(msg.x, msg.y), this.remotePtr);
+        this.remotePtrs[slot] = { x: msg.x, y: msg.y };
+        if (m && G.ready) m.remotePointer(slot, G.normToUI(msg.x, msg.y), this.remotePtrs[slot]);
         break;
       case 'down':
         norm = { x: msg.x, y: msg.y };
-        this.remotePtr = norm;
+        this.remotePtrs[slot] = norm;
         if (m && G.ready) {
           ui = G.normToUI(msg.x, msg.y);
-          m.remotePointer(ui, norm);
-          m.remoteDown(ui, msg.b, norm);
+          m.remotePointer(slot, ui, norm);
+          m.remoteDown(slot, ui, msg.b, norm);
           this.sendHud(true);
         }
         break;
       case 'wheel':
-        if (m && m.guestPicksSeeds()) G.injectPointer('wheel', msg.x, msg.y, 0, msg.dy);
+        if (m && m.guestPicksSeeds(slot)) G.injectPointer('wheel', msg.x, msg.y, 0, msg.dy);
         break;
       case 'key':
         if (m) {
-          m.remoteKey(String(msg.k || '').toLowerCase());
+          m.remoteKey(slot, String(msg.k || '').toLowerCase());
           this.sendHud(true);
         }
         break;
       case 'sv':
-        if (m && m.mode === 'survival') m.partnerUpdate(msg.state);
+        if (m && m.mode === 'survival') m.partnerUpdate(slot, msg.state);
         this.updatePipLabel();
         this.updateBadge();
+        break;
+      case 'watch':
+        if (m && m.mode === 'survival' && this.session) this.session.streamTo(slot, Number(msg.slot) || 0);
         break;
       case 'end-request':
       case 'to-room':
         if (this.phase === 'match') {
-          UI.toast(t(msg.t === 'to-room' ? 'guest_back_to_room' : 'guest_ended', { name: this.session.remoteName }), 'warn');
+          var key = msg.t === 'to-room' ? 'guest_back_to_room' : 'guest_ended';
+          this.toastAll(function () {
+            return { key: key, vars: { name: link.name } };
+          }, 'warn');
           this.returnToLobby();
         }
         break;
       case 'chat':
-        UI.chatLine(this.session.remoteName, String(msg.text || '').slice(0, 120), 'var(--mp-p2)');
+        var text = String(msg.text || '').slice(0, 120);
+        UI.chatLine(link.name, text, MP.SLOT_COLORS[slot]);
+        this.session.send({ t: 'chat', text: text, from: slot, name: link.name }, slot);
         break;
     }
   };
 
+  // Other players' cursors as seen by `forSlot` (host's included).
+  App.cursorsFor = function (forSlot) {
+    var self = this;
+    var out = [];
+    var m = this.match;
+    if (forSlot !== 0 && this.hostPtr && G.inLevel()) out.push({ slot: 0, x: this.hostPtr.x, y: this.hostPtr.y, name: this.session.localName });
+    Object.keys(this.remotePtrs).forEach(function (k) {
+      var slot = Number(k);
+      if (slot === forSlot) return;
+      var p = self.remotePtrs[slot];
+      var hud = m ? m.hud(slot) : null;
+      out.push({ slot: slot, x: p.x, y: p.y, name: self.playerName(slot), held: hud && hud.sel ? HELD[hud.sel.kind] : '' });
+    });
+    return out;
+  };
+
   App.sendHud = function (force) {
-    if (!this.match || !this.session || !this.session.connected) return;
+    var s = this.session;
+    if (!this.match || !s || !s.connected) return;
     var now = performance.now();
     if (!force && now - (this._hudAt || 0) < HUD_INTERVAL) return;
     this._hudAt = now;
-    this.session.send(Object.assign({ t: 'hud' }, this.match.hud()));
+    var self = this;
+    s.guests().forEach(function (g) {
+      var hud = self.match.hud(g.slot);
+      if (self.match.mode !== 'survival') hud.cursors = self.cursorsFor(g.slot);
+      s.sendTo(g.slot, Object.assign({ t: 'hud' }, hud));
+    });
     if (this.match.mode !== 'survival' && (force || now - (this._layoutAt || 0) >= LAYOUT_INTERVAL)) {
       this._layoutAt = now;
-      this.session.send({ t: 'layout', layout: this.hostLayout() });
+      s.send({ t: 'layout', layout: this.hostLayout() });
     }
   };
 
-  App.toastBoth = function (key, vars, kind, perRole) {
-    UI.toast(t(perRole ? perRole.host : key, vars), kind, 4000);
-    if (this.session) this.session.send({ t: 'toast', key: perRole ? perRole.guest : key, vars: vars, kind: kind });
+  // Toast for everyone: fn(slot) -> {key, vars} (or null for nobody).
+  App.toastAll = function (fn, kind, except) {
+    var mine = fn(0);
+    if (mine && except !== 0) UI.toast(t(mine.key, mine.vars), kind, 4000);
+    if (!this.session) return;
+    var s = this.session;
+    s.guests().forEach(function (g) {
+      if (g.slot === except) return;
+      var x = fn(g.slot);
+      if (x) s.sendTo(g.slot, { t: 'toast', key: x.key, vars: x.vars, kind: kind });
+    });
   };
 
   App.onMatchFinished = function (result) {
     if (this.role !== 'host' || !this.match) return;
     this.lastResult = result;
-    var names = this.names();
-    if (this.session) this.session.send({ t: 'end', result: result, names: names });
-    this.showResults(result, 'host');
-    this.recordMatch(result, names);
+    if (this.session) this.session.send({ t: 'end', result: result });
+    this.showResults(result, 0);
+    this.recordMatch(result);
   };
 
-  App.recordMatch = function (result, names) {
+  App.recordMatch = function (result) {
     var s = this.session;
     if (!api.available() || !s || !this.roomKey) return;
-    var rec = MP.matchRecord(result, names);
+    var rec = MP.matchRecord(result);
     rec.room = s.code;
     rec.key = this.roomKey;
     rec.stage = result.stage;
-    rec.players[0].self = !!api.user();
-    if (s.remoteInfo && s.remoteInfo.ticket) rec.players[1].ticket = s.remoteInfo.ticket;
+    rec.players.forEach(function (p) {
+      if (p.slot === 0) p.self = !!api.user();
+      else {
+        var g = s.link(p.slot);
+        if (g && g.info && g.info.ticket) p.ticket = g.info.ticket;
+      }
+      delete p.slot;
+    });
     api.postMatch(rec);
   };
 
-  App.names = function () {
-    var s = this.session;
-    if (!s) return ['', ''];
-    return this.role === 'host' ? [s.localName, s.remoteName] : [s.remoteName, s.localName];
-  };
-
-  App.showResults = function (result, role, names) {
-    var d = MP.describeResult(result, role, names || this.names());
+  App.showResults = function (result, mySlot) {
+    var d = MP.describeResult(result, mySlot);
     var self = this;
-    if (role === 'host') {
+    if (this.role === 'host') {
       d.actions = [
         { label: t('back_to_room'), cls: 'mp-brown', fn: function () {
           self.returnToLobby();
         } },
         { label: t('rematch'), cls: 'mp-green', fn: function () {
-          if (self.session && self.session.connected) self.startMatch();
+          if (self.session && self.session.connected && self.teamsValid()) self.startMatch();
           else self.returnToLobby();
         } },
       ];
@@ -969,8 +1164,7 @@
   };
 
   App.onLocalRunDone = function (state) {
-    var other = this.role === 'host' ? this.session && this.session.remoteName : this.session && this.session.remoteName;
-    UI.toast(t(state.result === 'won' ? 'you_survived' : 'you_fell', { n: state.wave, name: other }), state.result === 'won' ? 'good' : 'warn', 5000);
+    UI.toast(t(state.result === 'won' ? 'you_survived_all' : 'you_fell_all', { n: state.wave }), state.result === 'won' ? 'good' : 'warn', 5000);
     UI.expandPip(true);
   };
 
@@ -981,6 +1175,8 @@
     }
     if (this.session) this.session.stopStream();
     G.hooks.remoteChooser = false;
+    this.remotePtrs = {};
+    this.watchSlot = null;
     UI.hidePip();
     UI.renderVersusHud(null);
     UI.renderStage(null);
@@ -990,6 +1186,11 @@
     if (this.role !== 'host') return;
     this.endMatchCleanup();
     this.phase = 'lobby';
+    var self = this;
+    // Everyone gets ready again for the next match.
+    Object.keys(this.readyMap).forEach(function (k) {
+      self.readyMap[k] = false;
+    });
     if (this.session) this.session.send({ t: 'lobby-return' });
     this.broadcastLobby();
     UI.closeModal();
@@ -1010,8 +1211,13 @@
     switch (msg.t) {
       case 'lobby':
         if (msg.settings) this.settings = MP.normalizeSettings(msg.settings);
-        if (msg.guestReady != null) this.guestReady = msg.guestReady;
+        if (msg.roster) this.setRoster(msg.roster);
         this.refreshLobby();
+        break;
+      case 'roster':
+        if (msg.roster) this.setRoster(msg.roster);
+        if (this.phase === 'lobby') this.refreshLobby();
+        this.updateBadge();
         break;
       case 'start':
         this.guestEnterMatch(msg);
@@ -1030,17 +1236,19 @@
         this.layout = msg.layout;
         break;
       case 'end':
-        this.showResults(msg.result, 'guest', msg.names);
+        this.showResults(msg.result, this.mySlot);
         break;
       case 'lobby-return':
         this.guestExitMatch();
         this.phase = 'lobby';
+        this.guestReady = false;
         UI.closeModal();
         if (G.sceneName() === 'mainScene') this.openLobby();
         else G.goToMain();
         break;
       case 'chat':
-        UI.chatLine(this.session.remoteName, String(msg.text || '').slice(0, 120), 'var(--mp-p1)');
+        var from = msg.from == null ? 0 : Number(msg.from);
+        UI.chatLine(msg.name || this.playerName(from) || this.session.remoteName, String(msg.text || '').slice(0, 120), MP.SLOT_COLORS[from] || 'var(--mp-p1)');
         break;
       case 'toast':
         UI.toast(t(msg.key, msg.vars), msg.kind, 4000);
@@ -1048,17 +1256,30 @@
     }
   };
 
+  App.setRoster = function (roster) {
+    var me = this.mySlot;
+    this.roster = (roster || []).slice(0, MP.MAX_PLAYERS).map(function (p) {
+      return { slot: Number(p.slot) || 0, name: String(p.name || '').slice(0, 20), account: !!p.account, ready: !!p.ready, ping: p.ping == null ? null : Number(p.ping) || 0 };
+    });
+    var mine = this.roster.find(function (p) {
+      return p.slot === me;
+    });
+    if (mine && this.phase === 'lobby') this.guestReady = mine.ready;
+  };
+
   App.guestEnterMatch = function (msg) {
     if (msg.settings) this.settings = MP.normalizeSettings(msg.settings);
+    if (msg.roster) this.setRoster(msg.roster);
     this.seat = msg.seat || 'plants';
     this.phase = 'match';
     this.hud = null;
     this.layout = null;
     this.ghost = null;
+    this.watchSlot = null;
     this._toldChooser = false;
     UI.closeModal();
     UI.closeLobby();
-    if (this.settings.mode === 'survival') {
+    if (this.settings.mode === 'survival' && this.seat === 'own') {
       // Own lawn: run the level here and stream it to the host.
       UI.hideView();
       UI.hidePip();
@@ -1067,14 +1288,12 @@
       var self = this;
       this.guestRun = new MP.SoloRun(this.settings, function (state) {
         self.sendRunState(state, true);
-        if (state.phase === 'done') {
-          var hostRun = self.hud && self.hud.run;
-          if (!hostRun || hostRun.phase !== 'done') self.onLocalRunDone(state);
-        }
+        if (state.phase === 'done') self.onLocalRunDone(state);
       });
       this.guestRun.start();
       if (this.session) this.session.startStream(G.canvas, this.settings.quality);
     } else {
+      // Shared lawn (or watching a Survival match that already started).
       UI.showView();
       MP.audio.setLocalMuted(true);
       try {
@@ -1116,7 +1335,57 @@
     this.hud = null;
     this.layout = null;
     this.ghost = null;
+    this.watchSlot = null;
     this.updateBadge();
+  };
+
+  /* survival: the other lawns, one at a time in the picture-in-picture */
+
+  App.survivalRuns = function () {
+    if (this.role === 'host') return this.match ? this.match.runStates() : {};
+    return (this.hud && this.hud.runs) || {};
+  };
+
+  // Players whose lawn we can watch (not ourselves).
+  App.watchable = function () {
+    var me = this.role === 'host' ? 0 : this.mySlot;
+    return Object.keys(this.survivalRuns())
+      .map(Number)
+      .filter(function (s) {
+        return s !== me;
+      })
+      .sort();
+  };
+
+  App.showWatched = function (slot, stream) {
+    this.watchSlot = slot;
+    UI.showPip(stream, { nav: this.watchable().length > 1 });
+    this.updatePipLabel();
+  };
+
+  // Next/previous lawn (dir = 1 / -1).
+  App.watch = function (dir) {
+    var list = this.watchable();
+    var s = this.session;
+    if (!s) return;
+    if (!list.length) {
+      this.watchSlot = null;
+      UI.hidePip();
+      return;
+    }
+    var i = list.indexOf(this.watchSlot);
+    var next = list[(i < 0 ? 0 : i + (dir || 1) + list.length) % list.length];
+    if (this.role === 'host') {
+      var link = s.link(next);
+      this.watchSlot = next;
+      if (link && link.inStream) this.showWatched(next, link.inStream);
+      else UI.setPipWaiting();
+    } else {
+      this.watchSlot = next;
+      UI.setPipWaiting();
+      s.send({ t: 'watch', slot: next });
+    }
+    this.updatePipLabel();
   };
 
   App.viewPointer = function (type, x, y, button, dy) {
@@ -1128,6 +1397,7 @@
     }
     this.localPtr = { x: x, y: y };
     if (x < 0 || x > 1 || y < 0 || y > 1) return;
+    if (this.seat === 'spectator') return;
     if (type === 'down') {
       this.session.send({ t: 'down', x: x, y: y, b: button });
     } else if (type === 'wheel') {
@@ -1174,7 +1444,7 @@
   var HELD = { card: '🌱', shovel: '⛏', food: '⚡', zcard: '🧠' };
 
   App.frameRect = function () {
-    if (this.role === 'guest' && this.settings.mode !== 'survival') return UI.viewContentRect();
+    if (this.role === 'guest' && (this.settings.mode !== 'survival' || this.seat === 'spectator')) return UI.viewContentRect();
     var r = G.canvas && G.canvas.getBoundingClientRect();
     return r ? { left: r.left, top: r.top, width: r.width, height: r.height } : null;
   };
@@ -1183,7 +1453,7 @@
   App.renderLoading = function () {
     if (!this.session || this.phase !== 'match') return UI.renderLoading(null);
     var own = G.loadingState();
-    var watching = this.role === 'guest' && this.settings.mode !== 'survival';
+    var watching = this.role === 'guest' && (this.settings.mode !== 'survival' || this.seat === 'spectator');
     var info = watching ? this.hud && this.hud.loading : own;
     var frame = info && this.frameRect();
     if (!info || !frame) {
@@ -1207,23 +1477,30 @@
       UI.renderStage(null);
       return;
     }
-    var scene = { frame: frame, cells: [], lanes: [], cd: null };
+    var self = this;
+    var scene = { frame: frame, cells: [], lanes: [], sels: [], cursors: [], cd: null };
     var hud;
     if (this.role === 'host') {
-      hud = this.match ? this.match.hud() : null;
+      var ov = this.match ? this.match.overlay() : null;
+      hud = ov;
       scene.layout = this.hostLayout();
-      if (this.remotePtr && this.session.connected) {
-        scene.cursor = { x: this.remotePtr.x, y: this.remotePtr.y, name: this.session.remoteName, held: hud && hud.sel ? HELD[hud.sel.kind] : '' };
-      }
-      if (hud) {
-        if (hud.sel && hud.seat === 'plants') scene.sel = { kind: hud.sel.kind, i: hud.sel.i, tag: t('p2_label') };
-        if (hud.cell) scene.cells.push({ l: hud.cell.l, c: hud.cell.c, kind: hud.sel && hud.sel.kind });
-        if (hud.lane >= 0) scene.lanes.push({ l: hud.lane });
-        if (hud.hostLane >= 0) scene.lanes.push({ l: hud.hostLane, local: true });
+      scene.cursors = this.cursorsFor(0).map(function (c) {
+        return Object.assign(c, { color: MP.SLOT_COLORS[c.slot] });
+      });
+      if (ov) {
+        ov.picks.forEach(function (p) {
+          var name = self.playerName(p.slot);
+          if (p.slot !== 0) scene.sels.push({ kind: p.sel.kind, i: p.sel.i, tag: name, color: MP.SLOT_COLORS[p.slot] });
+          if (p.cell) scene.cells.push({ l: p.cell.l, c: p.cell.c, kind: p.sel.kind, color: MP.SLOT_COLORS[p.slot] });
+          if (p.lane >= 0) scene.lanes.push({ l: p.lane, local: p.slot === 0, color: MP.SLOT_COLORS[p.slot] });
+        });
       }
     } else {
       hud = this.hud;
       scene.layout = this.layout;
+      scene.cursors = ((hud && hud.cursors) || []).map(function (c) {
+        return Object.assign({}, c, { color: MP.SLOT_COLORS[c.slot] });
+      });
       var lp = this.localPtr;
       if (hud && hud.sel && lp && this.layout) {
         if (hud.seat === 'plants') {
@@ -1233,11 +1510,12 @@
             var l = Math.floor((lp.y - g.y) / g.ch);
             if (c >= 0 && c < g.cols && l >= 0 && l < g.rows) scene.cells.push({ l: l, c: c, kind: hud.sel.kind, local: true });
           }
-          scene.sel = { kind: hud.sel.kind, i: hud.sel.i, tag: t('you') };
+          scene.sels.push({ kind: hud.sel.kind, i: hud.sel.i, tag: t('you'), color: MP.SLOT_COLORS[this.mySlot] });
         } else if (this.layout.grid) {
           var gz = this.layout.grid;
           var lane = Math.floor((lp.y - gz.y) / gz.ch);
           if (lp.x >= gz.x && lane >= 0 && lane < gz.rows) scene.lanes.push({ l: lane, local: true });
+          scene.sels.push({ kind: hud.sel.kind, i: hud.sel.i, tag: t('you'), color: MP.SLOT_COLORS[this.mySlot] });
         }
         if (this.ghost) scene.ghost = { src: this.ghost.src, x: lp.x, y: lp.y, w: this.ghost.w };
       }
@@ -1253,7 +1531,7 @@
       ((lay && lay.cards) || []).forEach(function (r) {
         if (r) timerTop = Math.max(timerTop || 0, r.y + r.h + 0.012);
       });
-      var mySide = this.role === 'host' ? this.settings.hostSide : hud.seat;
+      var mySide = this.mySide();
       UI.renderVersusHud(frame, {
         brains: hud.brains || 0,
         income: hud.income || 0,
@@ -1283,12 +1561,12 @@
     return t('wave_of', { n: Math.max(1, run.wave), total: total });
   }
 
-  // Survival: partner's lawn label in the picture-in-picture.
+  // Survival: the watched lawn's label in the picture-in-picture.
   App.updatePipLabel = function () {
-    if (this.settings.mode !== 'survival' || !this.session) return;
+    if (this.settings.mode !== 'survival' || !this.session || this.watchSlot == null) return;
     var total = Number(this.settings.waves) || 0;
-    var run = this.role === 'host' ? this.match && this.match.partner : this.hud && this.hud.run;
-    UI.setPipLabel(this.session.remoteName, runLine(run, total));
+    var run = this.survivalRuns()[this.watchSlot];
+    UI.setPipLabel(this.playerName(this.watchSlot), runLine(run, total), MP.SLOT_COLORS[this.watchSlot], this.watchable().length > 1);
   };
 
   App.updateBadge = function () {
@@ -1298,23 +1576,26 @@
       return;
     }
     var self = this;
-    var names = this.names();
-    var players = [
-      { name: names[0], color: 'var(--mp-p1)', ping: this.role === 'guest' ? s.rtt : null },
-      { name: names[1] + (s.connected ? '' : ' …'), color: 'var(--mp-p2)', ping: this.role === 'host' && s.connected ? s.rtt : null },
-    ];
-    var line = '';
-    if (this.settings.mode === 'survival') {
-      var total = Number(this.settings.waves) || 0;
-      var mine = this.role === 'host' ? this.match && this.match.run && this.match.run.state() : this.guestRun && this.guestRun.state();
-      var other = this.role === 'host' ? this.match && this.match.partner : this.hud && this.hud.run;
-      players[0].info = runLine(this.role === 'host' ? mine : other, total);
-      players[1].info = runLine(this.role === 'host' ? other : mine, total);
+    var me = this.role === 'host' ? 0 : this.mySlot;
+    var total = Number(this.settings.waves) || 0;
+    var runs = this.settings.mode === 'survival' ? this.survivalRuns() : null;
+    if (runs && this.role === 'guest' && this.guestRun) {
+      runs = Object.assign({}, runs);
+      runs[me] = this.guestRun.state();
     }
+    var players = this.currentRoster().map(function (p) {
+      // Host: each guest's ping. Guest: ours to the host on the host's row,
+      // the others' as reported by the host.
+      var ping = self.role === 'host' ? (p.slot === 0 ? null : p.ping) : p.slot === 0 ? s.rtt : p.slot === me ? null : p.ping;
+      var out = { name: p.name + (p.slot === me ? ' (' + t('you') + ')' : ''), color: MP.SLOT_COLORS[p.slot], ping: ping };
+      if (self.settings.mode === 'versus') out.side = MP.sideOf(self.settings, p.slot);
+      if (runs) out.info = runLine(runs[p.slot], total);
+      return out;
+    });
     var actions = [{ label: t('end_match'), cls: 'mp-red', fn: function () {
       self.endMatch();
     } }];
-    UI.renderBadge({ mode: this.settings.mode, players: players, line: line, actions: actions });
+    UI.renderBadge({ mode: this.settings.mode, players: players, line: '', actions: actions });
   };
 
   /* ========================================================= main menu */
@@ -1440,7 +1721,7 @@
       G.hooks.remoteChooser = App.match.guestOwnsChooser();
       if (G.hooks.remoteChooser && !App._toldChooser) {
         App._toldChooser = true;
-        UI.toast(t('host_guest_picks_seeds', { name: App.session.remoteName }), 'good', 5000);
+        UI.toast(t('host_guests_pick_seeds'), 'good', 5000);
       }
       App.sendHud(false);
     } else if (App.guestRun) {
@@ -1478,9 +1759,14 @@
 
   // Host: when playing the zombies, the mouse drives the zombie packets.
   function hostPointer(e, type) {
-    if (App.role !== 'host' || !App.match || !App.match.localZombies() || !G.inLevel()) return;
+    if (App.role !== 'host' || !App.match || !G.inLevel()) return;
     var r = G.canvas.getBoundingClientRect();
-    var ui = G.normToUI((e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
+    var nx = (e.clientX - r.left) / r.width;
+    var ny = (e.clientY - r.top) / r.height;
+    // The guests see where the host points.
+    App.hostPtr = nx >= 0 && nx <= 1 && ny >= 0 && ny <= 1 ? { x: nx, y: ny } : null;
+    if (!App.match.localZombies()) return;
+    var ui = G.normToUI(nx, ny);
     if (type === 'down') App.match.localDown(ui, e.button);
     else App.match.localPointer(ui);
   }
@@ -1512,8 +1798,9 @@
 
   App.chat = function (text) {
     if (!this.session) return;
-    this.session.send({ t: 'chat', text: text });
-    UI.chatLine(this.session.localName, text, this.role === 'host' ? 'var(--mp-p1)' : 'var(--mp-p2)');
+    var me = this.role === 'host' ? 0 : this.mySlot;
+    this.session.send({ t: 'chat', text: text, from: me, name: this.session.localName });
+    UI.chatLine(this.session.localName, text, MP.SLOT_COLORS[me]);
   };
 
   App.init = function () {
@@ -1560,6 +1847,15 @@
       },
       lang: function (code) {
         App.setLang(code);
+      },
+      kick: function (slot) {
+        App.kick(slot);
+      },
+      setSide: function (slot, side) {
+        App.setSide(slot, side);
+      },
+      watch: function (dir) {
+        App.watch(dir);
       },
       exportSave: function () {
         App.exportSave();
@@ -1671,6 +1967,9 @@
       G.canvas.addEventListener('pointermove', function (e) {
         hostPointer(e, 'move');
       }, true);
+      G.canvas.addEventListener('pointerleave', function () {
+        App.hostPtr = null;
+      });
       G.on('scene', onScene);
       G.on('frame', onFrame);
       MP.cards.on('art', function (type, url) {

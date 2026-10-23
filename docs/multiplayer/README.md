@@ -45,12 +45,23 @@ bundle is not modified.
 
 ## Protocol (data channel, JSON)
 
-- Guest → host: `hello` (+ account ticket), `ready`, `zdeck`, `ptr {x,y}`,
-  `down {x,y,b}`, `wheel {x,y,dy}`, `key {k}`, `sv` (own Survival run),
+Star topology: the host (slot 0) has one data channel per guest (slots 1-3)
+and relays what the others need. Protocol version 3 (older clients are
+refused with `err_version`).
+
+- Guest → host: `hello` (+ account ticket), `ready`, `side` (Versus team),
+  `zdeck`, `ptr {x,y}`, `down {x,y,b}`, `wheel {x,y,dy}`, `key {k}`, `sv`
+  (own Survival run), `watch {slot}` (Survival: whose lawn to receive),
   `to-room`, `end-request`, `chat`.
-- Host → guest: `welcome`, `reject`, `lobby`, `start`, `hud` (10 Hz), `layout`
-  (packet/grid rectangles), `toast`, `end`, `lobby-return`, `chat`.
-- Both: `ping`/`pong`, `bye`.
+- Host → guest: `welcome {you: slot, roster}`, `reject`, `lobby`, `roster`
+  (names, ready, pings), `start {seat}`, `hud` (10 Hz, per guest: own
+  selection, team brains, other players' cursors, Survival runs), `layout`
+  (packet/grid rectangles), `toast`, `end`, `lobby-return`, `chat {from}`.
+- Both: `ping`/`pong`, `bye {reason}`.
+
+Media: the host calls each guest with its canvas (metadata `src: 0`); in
+Survival each guest calls the host with its own lawn, and the host re-sends
+to a guest the lawn of the player it asked to `watch` (`src: slot`).
 
 Coordinates are normalized to the game canvas (`0..1`, top-left origin), so
 they map 1:1 onto the streamed video regardless of window sizes or DPR.

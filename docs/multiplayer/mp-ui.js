@@ -403,13 +403,19 @@
       } }),
     ]);
     var head = el('div.mp-list-head', null, [el('div.mp-panel-title', { text: t('recent_matches') }), filters]);
-    var list = el('div.mp-list.mp-scroll', { 'data-scroll': 'history' });
-    if (h.error) list.appendChild(el('div.mp-error', { text: t(h.error) }));
-    else if (!h.list.length) list.appendChild(el('div.mp-empty-state', null, [el('div.mp-empty-title', { text: h.loading ? t('loading') : t('no_matches') })]));
+    var historyList = el('div.mp-list.mp-scroll', { 'data-scroll': 'history' });
+    if (h.error) historyList.appendChild(el('div.mp-error', { text: t(h.error) }));
+    else if (!h.list.length) historyList.appendChild(el('div.mp-empty-state', null, [el('div.mp-empty-title', { text: h.loading ? t('loading') : t('no_matches') })]));
     h.list.forEach(function (m) {
       var players = el('div.mp-match-players');
-      m.players.forEach(function (p, i) {
-        if (i) players.appendChild(el('span.mp-vs', { text: m.mode === 'versus' ? t('vs') : '+' }));
+      var list = m.players.slice();
+      if (m.mode === 'versus') {
+        list.sort(function (a, b) {
+          return (a.side === 'plants' ? 0 : 1) - (b.side === 'plants' ? 0 : 1);
+        });
+      }
+      list.forEach(function (p, i) {
+        if (i) players.appendChild(el('span.mp-vs', { text: m.mode === 'versus' && p.side !== list[i - 1].side ? t('vs') : '+' }));
         var detail = m.mode === 'versus' ? t('side_' + p.side) : m.mode === 'survival' ? t('wave_short', { n: p.score }) : '';
         players.appendChild(
           el('span.mp-match-player' + (p.win ? '.mp-winner' : ''), null, [
@@ -420,7 +426,7 @@
           ]),
         );
       });
-      list.appendChild(
+      historyList.appendChild(
         el('div.mp-list-item', null, [
           iconEl(m.mode || 'coop', 'mp-list-icon'),
           el('div.mp-list-main', null, [players, el('div.mp-list-sub', { text: t('mode_' + m.mode) + (m.stage ? ' • ' + stageLabel(m.stage) : '') + ' • ' + MP.util.formatTime(m.duration) })]),
@@ -428,7 +434,7 @@
         ]),
       );
     });
-    body.appendChild(el('div.mp-panel.mp-list-panel', null, [head, list]));
+    body.appendChild(el('div.mp-panel.mp-list-panel', null, [head, historyList]));
   }
 
   function renderAccountTab(outer, state) {
@@ -1121,26 +1127,59 @@
         } }),
       ]),
     ]);
-    var players = el('div.mp-players');
+    var players = el('div.mp-players' + (state.players.length > 2 ? '.mp-players-many' : ''));
     state.players.forEach(function (p) {
       if (!p) {
-        players.appendChild(el('div.mp-player.mp-empty', null, [el('span.mp-spinner', { style: { width: '22px', height: '22px' } }), el('span.mp-player-name', { text: t('empty_slot') })]));
+        players.appendChild(el('div.mp-player.mp-empty', null, [el('span.mp-spinner', { style: { width: '20px', height: '20px' } }), el('span.mp-player-name', { text: t('empty_slot') })]));
         return;
       }
       var tag = p.role === 'host' ? el('span.mp-player-tag.mp-host', { text: t('host') }) : el('span.mp-player-tag' + (p.ready ? '.mp-ok' : ''), { text: p.ready ? t('is_ready') : t('waiting') });
+      var canSwitch = edit || p.you;
+      var sideChip = p.side
+        ? el('button.mp-side-chip.mp-side-' + p.side, {
+            text: p.side === 'plants' ? '🌱' : '🧟',
+            title: t('side_' + p.side) + (canSwitch ? ' • ' + t('switch_side') : ''),
+            disabled: !canSwitch,
+            onclick: function () {
+              call('setSide', p.slot, p.side === 'plants' ? 'zombies' : 'plants');
+            },
+          })
+        : null;
       players.appendChild(
         el('div.mp-player' + (p.you ? '.mp-me' : ''), { title: p.you ? p.name + ' (' + t('you') + ')' : p.name }, [
-          el('span.mp-player-dot', { style: { background: p.role === 'host' ? 'var(--mp-p1)' : 'var(--mp-p2)' } }),
+          el('span.mp-player-dot', { style: { background: MP.SLOT_COLORS[p.slot] } }),
           el('span.mp-player-name', { text: p.name }),
           p.account ? el('span.mp-verified', { text: '✓', title: t('account_verified') }) : null,
+          sideChip,
           tag,
+          edit && p.slot > 0
+            ? el('button.mp-kick', { text: '✕', title: t('kick'), onclick: function () {
+                call('kick', p.slot);
+              } })
+            : null,
         ]),
       );
     });
-    var side = el('div.mp-room-side', null, [codeBox, el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('players') }), players])]);
+    var side = el('div.mp-room-side', null, [
+      codeBox,
+      el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('players_count', { n: state.playerCount, max: s.maxPlayers }) }), players]),
+    ]);
     var extra = el('div.mp-panel.mp-extra.mp-scroll', { 'data-scroll': 'extra' });
     if (edit) {
-      extra.appendChild(el('div.mp-panel-title', { text: t('quality') }));
+      extra.appendChild(el('div.mp-panel-title', { text: t('max_players') }));
+      extra.appendChild(
+        segment(
+          [2, 3, 4].map(function (n) {
+            return { value: n, label: String(n), disabled: n < state.playerCount };
+          }),
+          s.maxPlayers,
+          false,
+          function (v) {
+            call('setting', 'maxPlayers', v);
+          },
+        ),
+      );
+      extra.appendChild(el('div.mp-panel-title', { text: t('quality'), style: { marginTop: '10px' } }));
       extra.appendChild(
         segment(
           ['low', 'medium', 'high'].map(function (q) {
@@ -1217,14 +1256,14 @@
               { value: 'plants', label: t('side_plants') },
               { value: 'zombies', label: t('side_zombies') },
             ],
-            state.role === 'host' ? s.hostSide : s.hostSide === 'plants' ? 'zombies' : 'plants',
-            !edit,
+            MP.sideOf(s, state.mySlot),
+            false,
             function (v) {
-              // Shown from the viewer's perspective; stored as the host's side.
-              call('setting', 'hostSide', v);
+              call('setSide', state.mySlot, v);
             },
           ),
         );
+        opts.appendChild(el('div.mp-note', { text: t('teams_note') }));
       }
       Object.keys(MP.OPTIONS).forEach(function (key) {
         var def = MP.OPTIONS[key];
@@ -1330,8 +1369,15 @@
     badge.appendChild(head);
     info.players.forEach(function (p) {
       var ping = p.ping != null ? el('span.mp-ping' + (p.ping > 180 ? '.mp-bad' : ''), { text: t('ping', { ms: p.ping }) }) : null;
-      badge.appendChild(el('div.mp-badge-row', null, [el('span.mp-player-dot', { style: { background: p.color } }), el('span', { text: p.name }), ping]));
-      if (p.info) badge.appendChild(el('div.mp-badge-info', { text: p.info }));
+      badge.appendChild(
+        el('div.mp-badge-row', null, [
+          el('span.mp-player-dot', { style: { background: p.color } }),
+          p.side ? el('span.mp-badge-side', { text: p.side === 'plants' ? '🌱' : '🧟', title: t('side_' + p.side) }) : null,
+          el('span', { text: p.name }),
+          p.info ? el('span.mp-badge-status', { text: p.info }) : null,
+          ping,
+        ]),
+      );
     });
     if (info.line) badge.appendChild(el('div.mp-badge-info', { text: info.line }));
     badge.appendChild(el('div.mp-note', { text: t('chat_hint') }));
@@ -1350,13 +1396,24 @@
       video.muted = true;
       var name = el('span.mp-pip-name');
       var info = el('span.mp-pip-info');
+      var dot = el('span.mp-player-dot', { style: { background: 'var(--mp-p2)' } });
+      var prev = el('button.mp-pip-btn.mp-pip-nav', { title: t('pip_prev'), text: '◀', onclick: function (e) {
+        e.stopPropagation();
+        call('watch', -1);
+      } });
+      var next = el('button.mp-pip-btn.mp-pip-nav', { title: t('pip_next'), text: '▶', onclick: function (e) {
+        e.stopPropagation();
+        call('watch', 1);
+      } });
       var sound = el('button.mp-pip-btn', { title: t('pip_sound'), text: '🔇' });
       var expand = el('button.mp-pip-btn', { title: t('pip_expand'), text: '⤢' });
       var back = el('button.mp-btn.mp-small.mp-green.mp-pip-back', { text: t('pip_back') });
-      pip = el('div#pvzmp-pip.mp-interactive', null, [video, el('div.mp-pip-bar', null, [el('span.mp-player-dot', { style: { background: 'var(--mp-p2)' } }), name, info, sound, expand]), back]);
+      var wait = el('div.mp-pip-wait', null, [el('span.mp-spinner')]);
+      pip = el('div#pvzmp-pip.mp-interactive', null, [video, wait, el('div.mp-pip-bar', null, [prev, dot, name, info, next, sound, expand]), back]);
       pip._video = video;
       pip._name = name;
       pip._info = info;
+      pip._dot = dot;
       sound.onclick = function (e) {
         e.stopPropagation();
         video.muted = !video.muted;
@@ -1380,8 +1437,14 @@
       enablePipDrag(pip, pip.querySelector('.mp-pip-bar'));
       root.insertBefore(pip, layers.chat);
     }
+    pip.classList.remove('mp-pip-waiting');
     pip._video.srcObject = stream;
     pip._video.play().catch(function () {});
+  };
+
+  // Switching lawns: keep the window, show a spinner until the new one plays.
+  UI.setPipWaiting = function () {
+    if (pip) pip.classList.add('mp-pip-waiting');
   };
 
   // The window can be dragged by its title bar; the position is remembered.
@@ -1415,10 +1478,12 @@
     });
   }
 
-  UI.setPipLabel = function (name, info) {
+  UI.setPipLabel = function (name, info, color, nav) {
     if (!pip) return;
     pip._name.textContent = name || '';
     pip._info.textContent = info ? ' • ' + info : '';
+    if (color) pip._dot.style.background = color;
+    pip.classList.toggle('mp-pip-has-nav', !!nav);
   };
 
   UI.expandPip = function (on) {
@@ -1557,45 +1622,54 @@
       (scene.lanes || []).forEach(function (ln, i) {
         if (!grid || ln.l < 0) return;
         var n = stageNode('lane' + i, 'mp-lane');
+        n.style.setProperty('--mp-c', ln.color || '');
+        n.classList.toggle('mp-colored', !!ln.color && !ln.local);
         place(n, f, { x: grid.x, y: grid.y + grid.ch * ln.l, w: grid.cw * grid.cols + grid.cw * 0.6, h: grid.ch });
       });
       (scene.cells || []).forEach(function (c, i) {
         if (!grid || !c) return;
         var n = stageNode('cell' + i, 'mp-cell');
-        n.className = 'mp-cell' + (c.local ? ' mp-local' : '') + (c.kind === 'shovel' ? ' mp-shovel' : '');
+        n.className = 'mp-cell' + (c.local ? ' mp-local' : '') + (c.kind === 'shovel' ? ' mp-shovel' : '') + (c.color && !c.local ? ' mp-colored' : '');
+        n.style.setProperty('--mp-c', c.color || '');
         place(n, f, { x: grid.x + grid.cw * c.c + 2 / f.width, y: grid.y + grid.ch * c.l + 2 / f.height, w: grid.cw - 4 / f.width, h: grid.ch - 4 / f.height });
       });
-      if (scene.sel) {
-        var r = scene.sel.kind === 'card' ? lay.cards && lay.cards[scene.sel.i] : scene.sel.kind === 'zcard' ? lay.zcards && lay.zcards[scene.sel.i] : scene.sel.kind === 'shovel' ? lay.shovel : scene.sel.kind === 'food' ? lay.food : null;
-        if (r) {
-          var sn = stageNode('sel', 'mp-sel', function () {
-            return el('div.mp-sel', null, [el('div.mp-sel-tag')]);
-          });
-          sn.firstChild.textContent = scene.sel.tag || t('p2_label');
-          place(sn, f, r);
-        }
-      }
+      // Packets picked by several players stack their name tags.
+      var stack = {};
+      (scene.sels || []).forEach(function (sel, i) {
+        var r = sel.kind === 'card' ? lay.cards && lay.cards[sel.i] : sel.kind === 'zcard' ? lay.zcards && lay.zcards[sel.i] : sel.kind === 'shovel' ? lay.shovel : sel.kind === 'food' ? lay.food : null;
+        if (!r) return;
+        var k = sel.kind + ':' + sel.i;
+        var depth = (stack[k] = (stack[k] || 0) + 1) - 1;
+        var sn = stageNode('sel' + i, 'mp-sel', function () {
+          return el('div.mp-sel', null, [el('div.mp-sel-tag')]);
+        });
+        sn.style.setProperty('--mp-c', sel.color || 'var(--mp-p2)');
+        sn.firstChild.textContent = sel.tag || t('p2_label');
+        sn.firstChild.style.top = -16 - depth * 20 + 'px';
+        place(sn, f, r);
+      });
       (scene.cd || []).forEach(function (frac, i) {
         var zr = lay.zcards && lay.zcards[i];
         if (!zr || !(frac > 0)) return;
         var n = stageNode('cd' + i, 'mp-cd');
         place(n, f, { x: zr.x, y: zr.y, w: zr.w, h: zr.h * frac });
       });
-      if (scene.cursor) {
-        var cur = stageNode('cursor', 'mp-cursor', function () {
+      (scene.cursors || []).forEach(function (cu) {
+        var cur = stageNode('cursor' + cu.slot, 'mp-cursor', function () {
           var c = el('div.mp-cursor');
           c.innerHTML = ICONS.cursor;
           c.appendChild(el('div.mp-cursor-held'));
           c.appendChild(el('div.mp-cursor-name'));
           return c;
         });
-        cur.style.left = scene.cursor.x * f.width + 'px';
-        cur.style.top = scene.cursor.y * f.height + 'px';
-        cur.lastChild.textContent = scene.cursor.name || '';
+        cur.style.setProperty('--mp-c', cu.color || 'var(--mp-p2)');
+        cur.style.left = cu.x * f.width + 'px';
+        cur.style.top = cu.y * f.height + 'px';
+        cur.lastChild.textContent = cu.name || '';
         var held = cur.children[1];
-        held.style.display = scene.cursor.held ? 'flex' : 'none';
-        held.textContent = scene.cursor.held || '';
-      }
+        held.style.display = cu.held ? 'flex' : 'none';
+        held.textContent = cu.held || '';
+      });
       if (scene.ghost && scene.ghost.src) {
         var g = stageNode('ghost', 'mp-ghost', function () {
           return el('img.mp-ghost', { alt: '' });
@@ -1745,9 +1819,11 @@
     if (r.sub) win.appendChild(el('div.mp-result-sub', { text: r.sub }));
     if (r.stats && r.stats.length) {
       var grid = el('div.mp-panel.mp-stats');
+      grid.style.gridTemplateColumns = '1fr' + ' auto'.repeat((r.headers || []).length);
       grid.appendChild(el('div.mp-h', { text: '' }));
-      (r.headers || []).forEach(function (h) {
-        grid.appendChild(el('div.mp-h', { text: h, style: { textAlign: 'right' } }));
+      (r.headers || []).forEach(function (h, i) {
+        var slot = r.slots ? r.slots[i] : i;
+        grid.appendChild(el('div.mp-h', { style: { textAlign: 'right' } }, [el('span.mp-player-dot', { style: { background: MP.SLOT_COLORS[slot] } }), ' ' + h]));
       });
       r.stats.forEach(function (row) {
         grid.appendChild(el('div', { text: row[0], style: { textShadow: 'var(--mp-outline)' } }));
