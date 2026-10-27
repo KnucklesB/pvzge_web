@@ -1730,9 +1730,29 @@
     }
   }
 
+  // The game darkens the screen (with its loading flower) while it loads or
+  // switches scenes: keep our menu chip hidden meanwhile.
+  function screenCovered() {
+    try {
+      var cc = G.cc;
+      var shown = function (path) {
+        var node = cc.find(path);
+        return !!(node && node.activeInHierarchy);
+      };
+      if (shown('Canvas/LoaderFlower') || shown('Canvas/Camera/ScreenSplash')) return true;
+      return ['Canvas/ScreenCover', 'Canvas/ScreenSlash'].some(function (path) {
+        var node = cc.find(path);
+        var sprite = node && node.active && node.getComponent(cc.Sprite);
+        return !!(sprite && sprite.color && sprite.color.a > 10);
+      });
+    } catch (e) {
+      return false;
+    }
+  }
+
   // Account chip next to the profile name on the main menu.
   App.renderMenuAccount = function () {
-    var show = G.ready && !this.session && !UI.isLobbyOpen() && G.sceneName() === 'mainScene';
+    var show = G.ready && !this.session && !UI.isLobbyOpen() && G.sceneName() === 'mainScene' && !screenCovered();
     var node = show && G.cc.find('Canvas/PlayerSelectorButton');
     var r = node && G.nodeRectNorm(node);
     var c = r && G.canvas.getBoundingClientRect();

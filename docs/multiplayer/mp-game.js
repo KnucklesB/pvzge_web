@@ -52,10 +52,11 @@
   G.init = function () {
     if (G._initPromise) return G._initPromise;
     G._initPromise = (async function () {
-      while (!window.System || typeof System.import !== 'function') await sleep(200);
-      G.cc = await System.import('cc');
+      // Wait for the game's own modules: by then the engine ("cc", whose
+      // URL comes from the import map the page sets up at boot) is loaded.
       var probe = 'chunks:///_virtual/KeyListener.ts';
-      while (!(System.has && System.has(probe))) await sleep(250);
+      while (!window.System || typeof System.import !== 'function' || !(System.has && System.has(probe))) await sleep(250);
+      G.cc = await System.import('cc');
       for (var i = 0; i < MODULES.length; i++) {
         var name = MODULES[i];
         try {

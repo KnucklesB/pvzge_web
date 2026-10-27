@@ -71,6 +71,10 @@ Without configuration the game uses the public PeerJS cloud for signaling, so pl
 - If logging in shows *"The account server is not responding (HTTP 502)"*, the `multiplayer` container is stopped or restarting: check its status and logs (Portainer: *Containers → …-multiplayer-1 → Logs*). The log names the cause, e.g. `DATA_DIR /data is not writable`.
 - Players behind very strict NATs may need a TURN server, which can be added to `iceServers` in the same config file.
 
+### Updating the game
+
+After merging a new game version from upstream, run `node tools/game-version.js <previous game commit> <version>` (e.g. `node tools/game-version.js 0e4a0534 0.16.1`) and commit `docs/version.json`. Many game files keep their name across versions with new content; the page uses this list to make browsers that cached the previous version download them again, instead of mixing versions (black screen). The bundled nginx also makes browsers revalidate the game files (`Cache-Control: no-cache`, answered with a cheap 304 when unchanged). If a CDN such as Cloudflare caches the site, purge its cache after updating.
+
 ## Using Docker
 
 Deploy the game locally by using [Docker image](https://hub.docker.com/r/gaozih/pvzge)

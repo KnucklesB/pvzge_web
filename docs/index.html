@@ -35,7 +35,7 @@
   <!--<link rel="apple-touch-icon-precomposed" href=".png" />-->
 
   <link rel="stylesheet" type="text/css" href="style.css" />
-  <link rel="stylesheet" type="text/css" href="multiplayer/mp.css?v=3.1.0" />
+  <link rel="stylesheet" type="text/css" href="multiplayer/mp.css?v=3.1.1" />
 
   <script>
     (function () {
@@ -95,22 +95,22 @@
 
 
   <!-- Multiplayer (loaded before the engine so game audio can be streamed). -->
-  <script src="multiplayer/mp-config.js?v=3.1.0" charset="utf-8"></script>
-  <script src="multiplayer/vendor/peerjs.min.js?v=3.1.0" charset="utf-8"></script>
-  <script src="multiplayer/mp-core.js?v=3.1.0" charset="utf-8"></script>
-  <script src="multiplayer/mp-audio.js?v=3.1.0" charset="utf-8"></script>
-  <script src="multiplayer/mp-net.js?v=3.1.0" charset="utf-8"></script>
-  <script src="multiplayer/mp-game.js?v=3.1.0" charset="utf-8"></script>
-  <script src="multiplayer/mp-api.js?v=3.1.0" charset="utf-8"></script>
-  <script src="multiplayer/mp-cloud.js?v=3.1.0" charset="utf-8"></script>
-  <script src="multiplayer/mp-save.js?v=3.1.0" charset="utf-8"></script>
-  <script src="multiplayer/mp-levels.js?v=3.1.0" charset="utf-8"></script>
-  <script src="multiplayer/mp-cards.js?v=3.1.0" charset="utf-8"></script>
-  <script src="multiplayer/mp-skin.js?v=3.1.0" charset="utf-8"></script>
-  <script src="multiplayer/mp-ui.js?v=3.1.0" charset="utf-8"></script>
-  <script src="multiplayer/mp-modes.js?v=3.1.0" charset="utf-8"></script>
-  <script src="multiplayer/mp-app.js?v=3.1.0" charset="utf-8"></script>
-  <script src="multiplayer/mp-main.js?v=3.1.0" charset="utf-8"></script>
+  <script src="multiplayer/mp-config.js?v=3.1.1" charset="utf-8"></script>
+  <script src="multiplayer/vendor/peerjs.min.js?v=3.1.1" charset="utf-8"></script>
+  <script src="multiplayer/mp-core.js?v=3.1.1" charset="utf-8"></script>
+  <script src="multiplayer/mp-audio.js?v=3.1.1" charset="utf-8"></script>
+  <script src="multiplayer/mp-net.js?v=3.1.1" charset="utf-8"></script>
+  <script src="multiplayer/mp-game.js?v=3.1.1" charset="utf-8"></script>
+  <script src="multiplayer/mp-api.js?v=3.1.1" charset="utf-8"></script>
+  <script src="multiplayer/mp-cloud.js?v=3.1.1" charset="utf-8"></script>
+  <script src="multiplayer/mp-save.js?v=3.1.1" charset="utf-8"></script>
+  <script src="multiplayer/mp-levels.js?v=3.1.1" charset="utf-8"></script>
+  <script src="multiplayer/mp-cards.js?v=3.1.1" charset="utf-8"></script>
+  <script src="multiplayer/mp-skin.js?v=3.1.1" charset="utf-8"></script>
+  <script src="multiplayer/mp-ui.js?v=3.1.1" charset="utf-8"></script>
+  <script src="multiplayer/mp-modes.js?v=3.1.1" charset="utf-8"></script>
+  <script src="multiplayer/mp-app.js?v=3.1.1" charset="utf-8"></script>
+  <script src="multiplayer/mp-main.js?v=3.1.1" charset="utf-8"></script>
 
   <!-- Polyfills bundle. -->
 
@@ -120,15 +120,71 @@
   <!-- SystemJS support. -->
   <script src="src/system.bundle.js" charset="utf-8"> </script>
 
-  <!-- Import map -->
-  <script src="src/import-map.json" type="systemjs-importmap" charset="utf-8"> </script>
-
-  <script src="tmpPatch.js"></script>
+  <!--
+    Game boot. version.json names the build and lists the files that changed
+    in it while keeping their path. A browser that still holds the previous
+    build in its cache downloads those again before the game starts, instead
+    of mixing two versions (which leaves a black screen). The engine entry
+    (via the import map), tmpPatch.js and game-audio.js carry the build in
+    their URL. If the engine still fails to load, the core files are
+    refreshed once and the page reloads.
+  -->
   <script>
-    import('./game-audio.js')
-      .then(function (audio) { return audio.initializeGameAudio(); })
-      .then(function () { return System.import('./index.js'); })
-      .catch(function (err) { console.error(err); });
+    (function () {
+      var KEY = 'pvzge.build';
+      var CORE = [
+        'cocos-js/cc.js', 'src/settings.json', 'src/import-map.json', 'index.js', 'tmpPatch.js', 'game-audio.js',
+        'assets/internal/config.json', 'assets/internal/index.js', 'assets/main/config.json', 'assets/main/index.js',
+        'assets/resources/config.json', 'assets/resources/index.js'
+      ];
+      function getItem(store, key) { try { return window[store].getItem(key); } catch (e) { return null; } }
+      function setItem(store, key, value) { try { window[store].setItem(key, value); } catch (e) {} }
+      function refresh(list) {
+        return Promise.all(list.map(function (path) {
+          return fetch(path, { cache: 'reload' })
+            .then(function (res) { return res.ok ? res.arrayBuffer() : null; })
+            .catch(function () { return null; });
+        }));
+      }
+      function loadScript(src) {
+        return new Promise(function (resolve, reject) {
+          var s = document.createElement('script');
+          s.src = src;
+          s.onload = resolve;
+          s.onerror = reject;
+          document.body.appendChild(s);
+        });
+      }
+      function boot(build) {
+        var v = '?v=' + encodeURIComponent(build);
+        var map = document.createElement('script');
+        map.type = 'systemjs-importmap';
+        map.textContent = JSON.stringify({ imports: { cc: './cocos-js/cc.js' + v } });
+        document.body.appendChild(map);
+        // SystemJS reads import maps once; make it pick this one up.
+        if (System.prepareImport) System.prepareImport(true);
+        return loadScript('tmpPatch.js' + v)
+          .then(function () { return import('./game-audio.js' + v); })
+          .then(function (audio) { return audio.initializeGameAudio(); })
+          .then(function () { return System.import('./index.js'); });
+      }
+      fetch('version.json', { cache: 'no-store' })
+        .then(function (res) { return res.ok ? res.json() : {}; })
+        .catch(function () { return {}; })
+        .then(function (info) {
+          var build = info.build || 'dev';
+          var files = CORE.concat(info.refresh || []);
+          var ready = getItem('localStorage', KEY) === build ? Promise.resolve() : refresh(files).then(function () {
+            setItem('localStorage', KEY, build);
+          });
+          return ready.then(function () { return boot(build); }).catch(function (err) {
+            console.error(err);
+            if (getItem('sessionStorage', 'pvzge.retry') === build) return;
+            setItem('sessionStorage', 'pvzge.retry', build);
+            return refresh(files).then(function () { location.reload(); });
+          });
+        });
+    })();
   </script>
 </body>
 
