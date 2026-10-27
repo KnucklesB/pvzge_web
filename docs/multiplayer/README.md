@@ -29,7 +29,7 @@ bundle is not modified.
 | --- | --- |
 | `mp-config.js` | Signaling server / ICE configuration (overridable). |
 | `mp-core.js` | Namespace, events, storage, utilities, translations (en / pt / zh, switchable in the lobby; defaults to the game's language). |
-| `mp-audio.js` | Routes WebAudio through a master gain + `MediaStream` tap. Must load before the engine. |
+| `mp-audio.js` | Game audio capture/mute: Web Audio master gain + `MediaStream` tap, and (game 0.16+) routing of the `<audio>` pool of `window.audioEngine` (`game-audio.js`) through the same kind of graph when multiplayer needs it. Must load before the engine. |
 | `mp-net.js` | `Session`: rooms, handshake, heartbeat/RTT, media streams (both directions) and bitrate tuning. |
 | `mp-api.js` | REST client for the multiplayer server (accounts, saves, rooms, matches). |
 | `mp-cloud.js` | Mirrors the game's localStorage profiles to the logged-in account. |
