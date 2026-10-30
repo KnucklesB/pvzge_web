@@ -1740,6 +1740,15 @@
         return !!(node && node.activeInHierarchy);
       };
       if (shown('Canvas/LoaderFlower') || shown('Canvas/Camera/ScreenSplash')) return true;
+      // A game window (settings, profiles, info...) is open over the menu.
+      var canvas = cc.find('Canvas');
+      if (
+        canvas &&
+        canvas.children.some(function (n) {
+          return n.active && /Window|Panel|Dialog|Popup/.test(n.name) && !/Button$/.test(n.name);
+        })
+      )
+        return true;
       return ['Canvas/ScreenCover', 'Canvas/ScreenSlash'].some(function (path) {
         var node = cc.find(path);
         var sprite = node && node.active && node.getComponent(cc.Sprite);

@@ -1,5 +1,5 @@
 {
- "build": "0.16.1",
+ "build": "0.16.1-ptbr",
  "refresh": [
   "assets/main/index.js",
   "assets/resources/config.json",
@@ -106,7 +106,10 @@
   "assets/resources/import/f6/f6dcfdaf-c34e-4e59-80aa-51aa15793a96.json",
   "assets/resources/import/f7/f73c2f38-a5c4-4a50-bd97-682796262ff2.json",
   "assets/resources/native/1e/1e07c5c7-ce5b-45f7-8dc8-2fbf07346e8a.png",
+  "assets/resources/native/22/22c9fd5a-ed4e-4e5e-89bb-47576028744a/PICO12__.ttf",
+  "assets/resources/native/60/60ad4427-6c38-482b-9d75-e58a442076ac/ASHLEYSCRIPTMTSTD.ttf",
   "assets/resources/native/60/60dd66c2-f700-4c3f-b469-06a4ffa97a6c.png",
+  "assets/resources/native/aa/aad70f6c-3c07-41f7-a902-212a40c8acc4/BRIANNETOD.ttf",
   "assets/resources/native/f9/f94bd70d-2367-47cb-8f90-b82aa99c3b76.png",
   "assets/resources/native/fb/fbb61222-8332-4eb4-8a5d-6ee603b3481a.png",
   "cocos-js/cc.js",

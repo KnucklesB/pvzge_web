@@ -808,8 +808,9 @@
     }
   };
 
-  // The game itself ships English and Chinese.
+  // The game ships English and Chinese; mp-i18n.js adds Portuguese.
   G.gameLanguage = function () {
+    if (MP.ptBR && MP.ptBR.showing()) return 'pt';
     var ML = G.m.MultiLanguage && G.m.MultiLanguage.MultiLanguage;
     return ML && ML.currentLanguage === 1 ? 'zh' : 'en';
   };
