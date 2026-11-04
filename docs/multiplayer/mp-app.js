@@ -1635,20 +1635,34 @@
       label.getComponent(cc.Label).string = t('multiplayer');
       App.menuLabel = label.getComponent(cc.Label);
     }
-    // Play and Multiplayer side by side, centred where Play used to be. The
-    // buttons' Layout components resize them to their labels, so re-centre
-    // whenever either size changes.
+    // Play, Multiplayer (and Extras, docs/extras) side by side, centred where
+    // Play used to be. The buttons' Layout components resize them to their
+    // labels, so re-centre whenever a size changes.
     var x0 = play.position.x;
     var y = play.position.y;
     function relayout() {
       if (!btn.isValid || !play.isValid) return;
       var gap = 22;
-      var pw = play.getComponent(cc.UITransform).width * play.scale.x;
-      var bw = btn.getComponent(cc.UITransform).width * btn.scale.x;
-      var left = x0 - (pw + gap + bw) / 2;
-      play.setPosition(left + pw / 2, y, 0);
-      btn.setPosition(left + pw + gap + bw / 2, y, 0);
+      var row = ['PlayButton', 'MultiplayerButton', 'ExtrasButton']
+        .map(function (name) {
+          return canvas.getChildByName(name);
+        })
+        .filter(function (n) {
+          return n && n.isValid && n.active;
+        });
+      var widths = row.map(function (n) {
+        return n.getComponent(cc.UITransform).width * n.scale.x;
+      });
+      var total = widths.reduce(function (a, w) {
+        return a + w;
+      }, 0) + gap * (row.length - 1);
+      var left = x0 - total / 2;
+      row.forEach(function (n, i) {
+        n.setPosition(left + widths[i] / 2, y, 0);
+        left += widths[i] + gap;
+      });
     }
+    App.relayoutMenu = relayout;
     btn.on(cc.Node.EventType.SIZE_CHANGED, relayout);
     play.on(cc.Node.EventType.SIZE_CHANGED, relayout);
     relayout();

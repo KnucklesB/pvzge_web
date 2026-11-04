@@ -71,6 +71,16 @@ Without configuration the game uses the public PeerJS cloud for signaling, so pl
 - If logging in shows *"The account server is not responding (HTTP 502)"*, the `multiplayer` container is stopped or restarting: check its status and logs (Portainer: *Containers → …-multiplayer-1 → Logs*). The log names the cause, e.g. `DATA_DIR /data is not writable`.
 - Players behind very strict NATs may need a TURN server, which can be added to `iceServers` in the same config file.
 
+#### MariaDB
+
+The bundled `docker-compose.yml` stores everything in **MariaDB** (service `mariadb`, volume `mariadb-data`): set `DB_PASSWORD` and `DB_ROOT_PASSWORD` in a `.env` file next to it (or in the Portainer stack's environment variables). `docker compose --profile tools up -d` also starts Adminer on http://localhost:8081 to browse the database.
+
+- To use an existing MariaDB/MySQL server instead, give the `server/` process `DATABASE_URL=mariadb://user:password@host:3306/pvzge` (or `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`). Without them the server keeps using files in `DATA_DIR`, as before.
+- The tables are created on the first start, and an older install's `DATA_DIR/db.json` and save files are imported automatically (accounts, passwords, sessions, saves and their backups, match history); `db.json` is then renamed to `db.json.migrated`.
+- Tables: `users`, `sessions`, `saves` (current cloud save), `save_history` (the previous `SAVE_HISTORY` versions of each save, default 20; players restore them in Extras → Cloud, admins through the API), `save_profiles` (one row per game profile: name, coins, gems, world keys, tickets, sprouts and the profile JSON), `matches`, `scores` and `achievements`.
+- Synchronizing with other tools: change a save from outside by writing `saves.data` and setting `saves.updated_at` to the current time in milliseconds (`UNIX_TIMESTAMP()*1000`); within `DB_SYNC_SECONDS` (default 30) the server picks it up, refreshes `save_profiles`, and the player's game downloads it on its next sync.
+- `node cli.js users` / `password` work with either storage.
+
 ### Português (pt-BR)
 
 The game itself can be played in Brazilian Portuguese: in the game's **Settings**, the **Language** button now cycles *English → Português → 简体中文*. Portuguese is chosen automatically when the browser's language is Portuguese and nothing was picked yet. The translation (menus, almanac, plant and zombie names and descriptions, tips, dialogues, level names, quests…) is in [`docs/i18n/pt-BR.json`](docs/i18n/pt-BR.json) (English text → Portuguese) and is applied by [`docs/multiplayer/mp-i18n.js`](docs/multiplayer/mp-i18n.js) without modifying the game bundle; plant and zombie names follow the official Brazilian ones where known.
@@ -79,7 +89,22 @@ Three of the game fonts had no accented letters; [`tools/font-accents.py`](tools
 
 ### Updating the game
 
-After merging a new game version from upstream, run `node tools/game-version.js <previous game commit> <version>` (e.g. `node tools/game-version.js 0e4a0534 0.16.1`) and commit `docs/version.json`. Many game files keep their name across versions with new content; the page uses this list to make browsers that cached the previous version download them again, instead of mixing versions (black screen). The bundled nginx also makes browsers revalidate the game files (`Cache-Control: no-cache`, answered with a cheap 304 when unchanged). If a CDN such as Cloudflare caches the site, purge its cache after updating.
+After merging a new game version from upstream, run `node tools/game-version.js <previous game commit> <version>` (e.g. `node tools/game-version.js 0e4a0534 0.16.8-ptbr`) and commit `docs/version.json`. When the upstream repository can't be reached, the same game files are in the official Docker image (`gaozih/pvzge`, under `/usr/share/nginx/html`): commit them over the previous upstream version and merge that commit. Many game files keep their name across versions with new content; the page uses this list to make browsers that cached the previous version download them again, instead of mixing versions (black screen). The bundled nginx also makes browsers revalidate the game files (`Cache-Control: no-cache`, answered with a cheap 304 when unchanged). If a CDN such as Cloudflare caches the site, purge its cache after updating.
+
+## Extras
+
+Click **Extras** on the main menu for single-player additions (they never modify the game bundle and are switched off during multiplayer matches where they would change the game):
+
+| Tab | What it does |
+| --- | --- |
+| **Modes** | **Sandbox**: the game's own hidden sandbox mode (zombie packet bar to drop any zombie on any lane, lawn tools) with infinite sun, no recharge, optional waves and mowers. **Endless Survival**: ever-growing waves until you lose; your best wave goes to the leaderboard. **Daily Challenge**: one generated level per day, the same for everyone (arena, 8 preset plants, difficulty and 1-2 mutators picked from the date), scored for the day's leaderboard. |
+| **Options** | Extra speed (½x, 2x, 3x on top of the game's 1.5x button; keys `-` and `=`), auto-collect of sun / coins, gems and sprouts / plant food, health bars over zombies (body and armor) and damaged plants (key `V`; zombies hidden in fog stay hidden), damage numbers, zombie preview of the level in the seed chooser, end-of-level summary (time, zombies defeated, sun, plants planted and lost, plant food, mowers, waves, most used plant) and the in-level shortcut bar. |
+| **Mutators** | Apply to any single-player level: tough zombies (double health), double horde, scarce sun, no mowers, rushed waves, slow recharge, no plant food, fog and hasty zombies. |
+| **Achievements** | 21 achievements (no mowers, minimalist, untouchable, speedrun, 1,000 zombies, endless waves, daily streak...), kept in the browser and merged with the account when logged in. |
+| **Leaderboard** | Today's challenge and Endless Survival (needs the multiplayer server and an account). |
+| **Cloud** | The profiles in your cloud save and its earlier versions, restorable in one click. |
+
+The code lives in [`docs/extras`](docs/extras) (`x-play.js`: speed, auto-collect, health bars, statistics, preview and summary; `x-modes.js`: modes and mutators; `x-achievements.js`; `x-ui.js`: window and menu button).
 
 ## Using Docker
 
