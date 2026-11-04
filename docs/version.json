@@ -31,6 +31,7 @@
   "assets/resources/import/04/04b7571f2.json",
   "assets/resources/import/04/04d10746d.json",
   "assets/resources/import/05/0506b3b5c.json",
+  "assets/resources/import/05/050e75b4c.json",
   "assets/resources/import/05/053a16716.json",
   "assets/resources/import/05/05484e1cd.json",
   "assets/resources/import/05/055dd321f.json",
@@ -59,6 +60,7 @@
   "assets/resources/import/09/093fc8bed.json",
   "assets/resources/import/09/095d15580.json",
   "assets/resources/import/09/09974e70d.json",
+  "assets/resources/import/09/09ec05540.json",
   "assets/resources/import/0a/0a5f30e0f.json",
   "assets/resources/import/0a/0ab6b37e6.json",
   "assets/resources/import/0a/0aea50346.json",
@@ -175,7 +177,11 @@
   "assets/resources/native/ea/ea935437-4a2c-4160-8036-ca4e46d539c5.png",
   "assets/resources/native/f9/f94bd70d-2367-47cb-8f90-b82aa99c3b76.png",
   "assets/resources/native/fb/fbb61222-8332-4eb4-8a5d-6ee603b3481a.png",
+  "audio/Music/Pinata/HalloweenIntro.mp3",
+  "audio/Sounds/Game/Environment/Lawns/Beach/Rare4.mp3",
+  "audio/manifest.json",
   "cocos-js/cc.js",
+  "i18n/pt-BR.json",
   "src/settings.json",
   "tmpPatch.js"
  ]
