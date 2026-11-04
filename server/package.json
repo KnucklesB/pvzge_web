@@ -1,6 +1,6 @@
 {
   "name": "pvzge-multiplayer-server",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "private": true,
   "description": "Optional self-hosted server for PvZ2 Gardendless multiplayer: signaling, accounts, cloud saves, public rooms and match history",
   "main": "index.js",
@@ -10,7 +10,8 @@
   "license": "Apache-2.0",
   "dependencies": {
     "express": "4.22.3",
-    "peer": "1.0.2"
+    "peer": "1.0.2",
+    "mariadb": "3.5.4"
   },
   "engines": {
     "node": ">=18"

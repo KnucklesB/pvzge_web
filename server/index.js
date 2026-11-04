@@ -17,16 +17,19 @@
  *   ADMIN_USERS      comma separated usernames allowed to edit saves (their
  *                    own and every player's) and to import save files
  *   SAVE_IMPORT      "admins" (default) or "all": who may import save files
+ *   DB_HOST / DATABASE_URL  store everything in MariaDB instead of DATA_DIR
+ *                    (see db-mariadb.js for DB_PORT, DB_USER, DB_PASSWORD,
+ *                    DB_NAME, SAVE_HISTORY and DB_SYNC_SECONDS)
  */
 'use strict';
 
 const http = require('http');
 const express = require('express');
 const { ExpressPeerServer } = require('peer');
-const { Store } = require('./store');
+const { openStore } = require('./store');
 const auth = require('./auth');
 
-const VERSION = '3.0.0';
+const VERSION = '4.0.0';
 const PORT = Number(process.env.PORT) || 9000;
 const MAX_SAVE = (Number(process.env.MAX_SAVE_MB) || 8) * 1024 * 1024;
 const ORIGINS = (process.env.ALLOWED_ORIGINS || '*')
@@ -43,12 +46,7 @@ const ADMINS = new Set(
 );
 const IMPORT_ALL = (process.env.SAVE_IMPORT || '').toLowerCase() === 'all';
 
-const store = new Store(process.env.DATA_DIR || require('path').join(__dirname, 'data'));
-try {
-  store.checkWritable();
-} catch (e) {
-  console.error('[store] DATA_DIR %s is not writable: %s. Accounts and saves will fail until this is fixed.', store.dir, e.message);
-}
+let store; // opened in start()
 const app = express();
 const server = http.createServer(app);
 
@@ -182,7 +180,7 @@ function optionalUser(req, res, next) {
 /* ------------------------------------------------------------------- API */
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, version: VERSION, features: ['accounts', 'saves', 'rooms', 'matches', 'admin'] });
+  res.json({ ok: true, version: VERSION, storage: store.kind, features: ['accounts', 'saves', 'rooms', 'matches', 'admin', 'history', 'scores', 'achievements', 'daily'] });
 });
 
 // Accounts ---------------------------------------------------------------
@@ -197,7 +195,7 @@ app.post('/api/auth/register', limit('auth', 10), json, wrap(async (req, res) =>
   if (password.length < 6 || password.length > 128) return res.status(400).json({ error: 'bad_password' });
   if (store.findUser(username)) return res.status(409).json({ error: 'username_taken' });
   const hash = await auth.hashPassword(password);
-  const user = store.createUser(username, hash);
+  const user = await store.createUser(username, hash);
   const token = store.createSession(user.id);
   res.json({ token, user: userView(user) });
 }));
@@ -226,7 +224,7 @@ app.post('/api/auth/password', limit('auth', 10), requireUser, json, wrap(async 
   const next = typeof (req.body && req.body.password) === 'string' ? req.body.password : '';
   if (next.length < 6 || next.length > 128) return res.status(400).json({ error: 'bad_password' });
   if (!(await auth.verifyPassword(current, req.user.password))) return res.status(401).json({ error: 'bad_credentials' });
-  store.setPassword(req.user.id, await auth.hashPassword(next));
+  await store.setPassword(req.user.id, await auth.hashPassword(next));
   res.json({ ok: true });
 }));
 
@@ -238,14 +236,14 @@ app.get('/api/auth/ticket', requireUser, (req, res) => {
 
 // Cloud saves ------------------------------------------------------------
 
-app.get('/api/save', limit('save', 30), requireUser, (req, res) => {
+app.get('/api/save', limit('save', 30), requireUser, wrap(async (req, res) => {
   const meta = store.saveMeta(req.user.id);
   if (!meta) return res.json({ save: null });
   if (req.query.meta) return res.json({ save: meta });
-  res.json({ save: Object.assign({ data: store.readSave(req.user.id) }, meta) });
-});
+  res.json({ save: Object.assign({ data: await store.readSave(req.user.id) }, meta) });
+}));
 
-app.put('/api/save', limit('save', 30), requireUser, bigJson, (req, res) => {
+app.put('/api/save', limit('save', 30), requireUser, bigJson, wrap(async (req, res) => {
   const data = req.body && req.body.data;
   const bad = validSave(data);
   if (bad) return res.status(bad === 'save_too_large' ? 413 : 400).json({ error: bad });
@@ -254,9 +252,26 @@ app.put('/api/save', limit('save', 30), requireUser, bigJson, (req, res) => {
   if (meta && base != null && Number(base) !== meta.updatedAt && !req.body.force) {
     return res.status(409).json({ error: 'conflict', save: meta });
   }
-  const saved = store.writeSave(req.user.id, data, clean(req.body.device, 60));
+  const saved = await store.writeSave(req.user.id, data, clean(req.body.device, 60));
   res.json({ save: saved });
-});
+}));
+
+// Previous versions of the player's own save, a summary of its profiles and
+// restoring one of those versions (the current one is kept in the history).
+app.get('/api/save/history', limit('save', 30), requireUser, wrap(async (req, res) => {
+  res.json({ history: await store.saveHistory(req.user.id) });
+}));
+
+app.get('/api/save/profiles', limit('save', 30), requireUser, wrap(async (req, res) => {
+  res.json({ profiles: await store.saveProfiles(req.user.id) });
+}));
+
+app.post('/api/save/restore', limit('save', 10), requireUser, json, wrap(async (req, res) => {
+  const data = await store.readSaveVersion(req.user.id, clean(req.body && req.body.id, 24));
+  if (!data) return res.status(404).json({ error: 'not_found' });
+  const saved = await store.writeSave(req.user.id, data, 'restore', 'restore');
+  res.json({ save: saved });
+}));
 
 // Administration (ADMIN_USERS) -------------------------------------------
 
@@ -277,26 +292,50 @@ function targetUser(req, res) {
   return u;
 }
 
-app.get('/api/admin/users/:name/save', limit('admin', 120), requireAdmin, (req, res) => {
+app.get('/api/admin/users/:name/save', limit('admin', 120), requireAdmin, wrap(async (req, res) => {
   const u = targetUser(req, res);
   if (!u) return;
   const meta = store.saveMeta(u.id);
-  res.json({ save: meta ? Object.assign({ data: store.readSave(u.id) }, meta) : null });
-});
+  res.json({ save: meta ? Object.assign({ data: await store.readSave(u.id) }, meta) : null });
+}));
+
+app.get('/api/admin/users/:name/history', limit('admin', 120), requireAdmin, wrap(async (req, res) => {
+  const u = targetUser(req, res);
+  if (!u) return;
+  res.json({ history: await store.saveHistory(u.id), profiles: await store.saveProfiles(u.id) });
+}));
+
+app.get('/api/admin/users/:name/history/:id', limit('admin', 120), requireAdmin, wrap(async (req, res) => {
+  const u = targetUser(req, res);
+  if (!u) return;
+  const data = await store.readSaveVersion(u.id, clean(req.params.id, 24));
+  if (!data) return res.status(404).json({ error: 'not_found' });
+  res.json({ save: { data } });
+}));
+
+app.post('/api/admin/users/:name/restore', limit('admin', 30), requireAdmin, json, wrap(async (req, res) => {
+  const u = targetUser(req, res);
+  if (!u) return;
+  const data = await store.readSaveVersion(u.id, clean(req.body && req.body.id, 24));
+  if (!data) return res.status(404).json({ error: 'not_found' });
+  const saved = await store.writeSave(u.id, data, 'admin:' + req.user.username, 'restore');
+  console.log('[admin] %s restored an older save of %s', req.user.username, u.username);
+  res.json({ save: saved });
+}));
 
 // Replaces a player's cloud save (the previous one is kept as a backup).
 // Their game downloads it on its next sync.
-app.put('/api/admin/users/:name/save', limit('admin', 60), requireAdmin, bigJson, (req, res) => {
+app.put('/api/admin/users/:name/save', limit('admin', 60), requireAdmin, bigJson, wrap(async (req, res) => {
   const u = targetUser(req, res);
   if (!u) return;
   const data = req.body && req.body.data;
   const bad = validSave(data);
   if (bad) return res.status(bad === 'save_too_large' ? 413 : 400).json({ error: bad });
-  store.backupSave(u.id);
-  const saved = store.writeSave(u.id, data, 'admin:' + req.user.username);
+  await store.backupSave(u.id);
+  const saved = await store.writeSave(u.id, data, 'admin:' + req.user.username, 'admin');
   console.log('[admin] %s replaced the save of %s', req.user.username, u.username);
   res.json({ save: saved });
-});
+}));
 
 // Sets a new password for a player who forgot theirs (their sessions end).
 app.post('/api/admin/users/:name/password', limit('admin', 30), requireAdmin, json, wrap(async (req, res) => {
@@ -304,7 +343,7 @@ app.post('/api/admin/users/:name/password', limit('admin', 30), requireAdmin, js
   if (!u) return;
   const password = typeof (req.body && req.body.password) === 'string' ? req.body.password : '';
   if (password.length < 6 || password.length > 128) return res.status(400).json({ error: 'bad_password' });
-  store.setPassword(u.id, await auth.hashPassword(password));
+  await store.setPassword(u.id, await auth.hashPassword(password));
   console.log('[admin] %s set a new password for %s', req.user.username, u.username);
   res.json({ ok: true });
 }));
@@ -339,7 +378,7 @@ app.post('/local/users/:name/password', localOnly, json, wrap(async (req, res) =
   if (!u) return res.status(404).json({ error: 'not_found' });
   const password = typeof (req.body && req.body.password) === 'string' ? req.body.password : '';
   if (password.length < 6 || password.length > 128) return res.status(400).json({ error: 'bad_password' });
-  store.setPassword(u.id, await auth.hashPassword(password));
+  await store.setPassword(u.id, await auth.hashPassword(password));
   console.log('[cli] new password set for %s', u.username);
   res.json({ ok: true, username: u.username });
 }));
@@ -453,6 +492,68 @@ app.get('/api/users/:name', limit('rooms', 120), (req, res) => {
   res.json({ user: store.publicUser(user) });
 });
 
+// Leaderboards and achievements -----------------------------------------
+
+// The server's date decides the daily challenge, so every player gets the
+// same one whatever their clock says.
+function today(offsetDays) {
+  return new Date(Date.now() + (offsetDays || 0) * 86400000).toISOString().slice(0, 10);
+}
+
+app.get('/api/daily', (req, res) => {
+  const date = today();
+  res.json({ date, seed: parseInt(require('crypto').createHash('sha256').update('daily:' + date).digest('hex').slice(0, 8), 16) });
+});
+
+// daily:YYYY-MM-DD (today or yesterday, for runs that end after midnight),
+// survival (solo endless waves) and challenge:<id> boards.
+function validBoard(board) {
+  const m = /^daily:(\d{4}-\d{2}-\d{2})$/.exec(board);
+  if (m) return m[1] === today() || m[1] === today(-1);
+  return board === 'survival' || /^challenge:[a-z0-9_-]{1,32}$/.test(board);
+}
+
+app.get('/api/scores/:board', limit('rooms', 120), optionalUser, (req, res) => {
+  const board = clean(req.params.board, 48);
+  const list = store.listScores(board, Math.min(100, Number(req.query.limit) || 20));
+  let me = null;
+  if (req.user) {
+    const all = store.db.scores[board] || [];
+    const i = all.findIndex((e) => e.userId === req.user.id);
+    if (i >= 0) me = { rank: i + 1, score: all[i].score };
+  }
+  res.json({ board, scores: list, me });
+});
+
+app.post('/api/scores/:board', limit('scores', 20), requireUser, json, (req, res) => {
+  const board = clean(req.params.board, 48);
+  if (!validBoard(board)) return res.status(400).json({ error: 'bad_board' });
+  const score = Math.floor(Number(req.body && req.body.score));
+  if (!Number.isFinite(score) || score < 0 || score > 1e9) return res.status(400).json({ error: 'bad_score' });
+  const d = (req.body && req.body.details) || {};
+  const details = {};
+  for (const k of ['waves', 'time', 'kills', 'sun', 'plants', 'stage', 'mutators']) {
+    if (d[k] != null) details[k] = typeof d[k] === 'number' ? Math.max(0, Math.min(1e9, d[k])) : clean(d[k], 80);
+  }
+  const r = store.addScore(board, req.user.id, score, details);
+  if (board === 'survival' && (Number(details.waves) || 0) > (req.user.stats.bestSoloWave || 0)) {
+    req.user.stats.bestSoloWave = Number(details.waves) || 0;
+    store.persistUser(req.user);
+  }
+  res.json(r);
+});
+
+const ACHIEVEMENT = /^[a-z0-9_]{2,40}$/;
+
+app.get('/api/achievements', limit('save', 60), requireUser, (req, res) => {
+  res.json({ achievements: store.getAchievements(req.user.id) });
+});
+
+app.put('/api/achievements', limit('save', 30), requireUser, json, (req, res) => {
+  const ids = (Array.isArray(req.body && req.body.ids) ? req.body.ids : []).filter((id) => typeof id === 'string' && ACHIEVEMENT.test(id)).slice(0, 200);
+  res.json({ achievements: store.addAchievements(req.user.id, ids) });
+});
+
 app.use('/api', (req, res) => res.status(404).json({ error: 'not_found' }));
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
@@ -474,13 +575,32 @@ const peer = ExpressPeerServer(server, {
 });
 app.use('/peerjs', peer);
 
-server.listen(PORT, process.env.HOST || undefined, () => {
-  console.log(`PvZ2 Gardendless multiplayer server ${VERSION} listening on :${PORT}`);
-});
+async function start() {
+  const dataDir = process.env.DATA_DIR || require('path').join(__dirname, 'data');
+  try {
+    store = await openStore(process.env, dataDir);
+  } catch (e) {
+    console.error('[store] %s', e.message);
+    process.exit(1);
+  }
+  try {
+    store.checkWritable();
+  } catch (e) {
+    console.error('[store] DATA_DIR %s is not writable: %s. Accounts and saves will fail until this is fixed.', store.dir, e.message);
+  }
+  server.listen(PORT, process.env.HOST || undefined, () => {
+    console.log(`PvZ2 Gardendless multiplayer server ${VERSION} listening on :${PORT} (storage: ${store.kind})`);
+  });
+}
+start();
 
+let closing = false;
 function shutdown() {
-  store.flushSync();
-  process.exit(0);
+  if (closing) return;
+  closing = true;
+  Promise.resolve(store && store.close())
+    .catch((e) => console.error('[store] %s', e.message))
+    .finally(() => process.exit(0));
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

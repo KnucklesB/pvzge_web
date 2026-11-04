@@ -1,6 +1,11 @@
 # Self-hosted game + multiplayer server (signaling, accounts, cloud saves,
-# public rooms, match history):
+# public rooms, match history, leaderboards, achievements) + MariaDB:
 #   docker compose up -d --build --remove-orphans   ->   http://localhost:8080
+#
+# Set at least DB_PASSWORD and DB_ROOT_PASSWORD in a .env file next to this
+# one (or in the stack's environment variables in Portainer).
+# Optional database web UI (Adminer) on http://localhost:8081:
+#   docker compose --profile tools up -d
 services:
   game:
     build: .
@@ -23,9 +28,20 @@ services:
       ADMIN_USERS: "${ADMIN_USERS:-}"
       # "all" lets every logged-in player import save files (default: admins).
       SAVE_IMPORT: "${SAVE_IMPORT:-admins}"
+      # Everything is stored in MariaDB. On the first start the accounts and
+      # saves of an older install (the multiplayer-data volume) are imported.
+      DB_HOST: mariadb
+      DB_NAME: "${DB_NAME:-pvzge}"
+      DB_USER: "${DB_USER:-pvzge}"
+      DB_PASSWORD: "${DB_PASSWORD:-change-me}"
+      # Previous versions kept per cloud save (restorable in the game).
+      SAVE_HISTORY: "${SAVE_HISTORY:-20}"
     volumes:
-      # Accounts, cloud saves and match history live here: keep this volume.
+      # Older installs kept their data here; still used for the migration.
       - multiplayer-data:/data
+    depends_on:
+      mariadb:
+        condition: service_healthy
     networks:
       default:
         # Also reachable by the service name used by older compose files.
@@ -33,5 +49,36 @@ services:
           - signaling
     restart: unless-stopped
 
+  mariadb:
+    image: mariadb:11.4
+    environment:
+      MARIADB_DATABASE: "${DB_NAME:-pvzge}"
+      MARIADB_USER: "${DB_USER:-pvzge}"
+      MARIADB_PASSWORD: "${DB_PASSWORD:-change-me}"
+      MARIADB_ROOT_PASSWORD: "${DB_ROOT_PASSWORD:-change-me-too}"
+    command: ["--max-allowed-packet=64M", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      # Accounts, cloud saves and history live here: keep this volume.
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  adminer:
+    image: adminer:4.8.1
+    profiles: ["tools"]
+    ports:
+      - "8081:8080"
+    environment:
+      ADMINER_DEFAULT_SERVER: mariadb
+    depends_on:
+      - mariadb
+    restart: unless-stopped
+
 volumes:
   multiplayer-data:
+  mariadb-data:

@@ -26,12 +26,27 @@ function fail(msg) {
   process.exit(1);
 }
 
-function readSecret() {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'db.json'), 'utf8')).secret || '';
-  } catch (e) {
-    fail('Cannot read ' + path.join(DATA_DIR, 'db.json') + ' (' + e.message + '). Is DATA_DIR right?');
+let storePromise = null;
+// The same storage as the server (DATA_DIR files, or MariaDB when DB_HOST /
+// DATABASE_URL is set).
+function offlineStore() {
+  if (!storePromise) {
+    storePromise = require('./store')
+      .openStore(Object.assign({}, process.env, { DB_SYNC_SECONDS: '0', DB_MIGRATE: 'false' }), DATA_DIR)
+      .catch((e) => fail('Cannot open the server data (' + e.message + '). Is DATA_DIR / DB_HOST right?'));
   }
+  return storePromise;
+}
+
+async function readSecret() {
+  if (!require('./store').dbConfigured(process.env)) {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'db.json'), 'utf8')).secret || '';
+    } catch (e) {
+      fail('Cannot read ' + path.join(DATA_DIR, 'db.json') + ' (' + e.message + '). Is DATA_DIR right?');
+    }
+  }
+  return (await offlineStore()).secret;
 }
 
 function localKey(secret) {
@@ -39,8 +54,9 @@ function localKey(secret) {
 }
 
 // Request to the running server; resolves null when it isn't running.
-function call(method, url, body) {
+async function call(method, url, body) {
   const data = body ? JSON.stringify(body) : null;
+  const key = localKey(await readSecret());
   return new Promise((resolve, reject) => {
     const req = http.request(
       {
@@ -48,7 +64,7 @@ function call(method, url, body) {
         port: PORT,
         path: url,
         method,
-        headers: Object.assign({ 'x-local-key': localKey(readSecret()) }, data ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } : {}),
+        headers: Object.assign({ 'x-local-key': key }, data ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } : {}),
       },
       (res) => {
         let text = '';
@@ -82,17 +98,12 @@ function printUsers(users) {
   console.log('\n' + users.length + ' account(s).');
 }
 
-function offlineStore() {
-  const { Store } = require('./store');
-  return new Store(DATA_DIR);
-}
-
 async function users() {
   const r = await call('GET', '/local/users');
   if (r && r.status === 200) return printUsers(r.json.users);
   if (r) fail('The server refused the request (' + r.status + '). Run this inside the server container.');
   const admins = new Set((process.env.ADMIN_USERS || '').split(',').map((s) => s.trim().toLowerCase()));
-  const store = offlineStore();
+  const store = await offlineStore();
   printUsers(
     store
       .listUsers()
@@ -113,11 +124,11 @@ async function password(name, pass) {
     if (r.status !== 200) fail('The server refused the request (' + r.status + ').');
     username = r.json.username;
   } else {
-    const store = offlineStore();
+    const store = await offlineStore();
     const u = store.findUser(name);
     if (!u) fail('No account named "' + name + '". See: node cli.js users');
-    store.setPassword(u.id, await require('./auth').hashPassword(pass));
-    store.flushSync();
+    await store.setPassword(u.id, await require('./auth').hashPassword(pass));
+    await store.close();
     username = u.username;
   }
   console.log('New password for ' + username + (generated ? ': ' + pass : ' set.'));
