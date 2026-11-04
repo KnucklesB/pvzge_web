@@ -1,5 +1,12 @@
-# Self-hosted game + multiplayer signaling server:
-#   docker compose up -d   ->   http://localhost:8080
+# Self-hosted game + multiplayer server (signaling, accounts, cloud saves,
+# public rooms, match history, leaderboards, achievements):
+#   docker compose up -d --build --remove-orphans   ->   http://localhost:8080
+#
+# Data goes to your external MariaDB (or MySQL) server: set DB_HOST, DB_USER,
+# DB_PASSWORD and DB_NAME (or DATABASE_URL) in a .env file next to this one or
+# in the stack's environment variables (Portainer). The database and the user
+# must exist; the tables are created on the first start. Without DB_HOST /
+# DATABASE_URL everything is stored in files in the multiplayer-data volume.
 services:
   game:
     build: .
@@ -9,11 +16,43 @@ services:
       - ./server/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./server/mp-config.js:/usr/share/nginx/html/multiplayer/mp-config.js:ro
     depends_on:
-      - signaling
+      - multiplayer
     restart: unless-stopped
 
-  signaling:
+  multiplayer:
     build: ./server
     environment:
       PROXIED: "true"
+      # Accounts allowed to edit/import saves (theirs and every player's),
+      # comma separated, e.g. ADMIN_USERS=knuckles. Set it in the stack's
+      # environment variables (Portainer) or in a .env file next to this one.
+      ADMIN_USERS: "${ADMIN_USERS:-}"
+      # "all" lets every logged-in player import save files (default: admins).
+      SAVE_IMPORT: "${SAVE_IMPORT:-admins}"
+      # External MariaDB. On the first start against an empty database the
+      # accounts and saves of the multiplayer-data volume are imported; at any
+      # time `docker compose exec multiplayer node cli.js import-legacy /data`
+      # merges them again (see README, "Legacy import").
+      DB_HOST: "${DB_HOST:-}"
+      DB_PORT: "${DB_PORT:-3306}"
+      DB_NAME: "${DB_NAME:-pvzge}"
+      DB_USER: "${DB_USER:-pvzge}"
+      DB_PASSWORD: "${DB_PASSWORD:-}"
+      DATABASE_URL: "${DATABASE_URL:-}"
+      # Previous versions kept per cloud save (restorable in the game).
+      SAVE_HISTORY: "${SAVE_HISTORY:-20}"
+    volumes:
+      # File storage (without a database) and the legacy data to import.
+      - multiplayer-data:/data
+    # Lets DB_HOST=host.docker.internal reach a MariaDB on this same machine.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      default:
+        # Also reachable by the service name used by older compose files.
+        aliases:
+          - signaling
     restart: unless-stopped
+
+volumes:
+  multiplayer-data:

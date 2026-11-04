@@ -68,7 +68,10 @@
   function iconEl(name, cls) {
     var span = el('span' + (cls ? '.' + cls : ''));
     span.innerHTML = ICONS[name] || '';
-    return span.firstChild || span;
+    var svg = span.firstChild;
+    if (!svg) return span;
+    if (cls) svg.classList.add(cls);
+    return svg;
   }
 
   /* ------------------------------------------------------------ toasts */
@@ -154,7 +157,6 @@
 
   var lobbyState = null;
   var lobbyOpen = false;
-  var homeNodes = null;
 
   UI.isLobbyOpen = function () {
     return lobbyOpen;
@@ -162,39 +164,66 @@
 
   UI.openLobby = function (state) {
     lobbyOpen = true;
-    homeNodes = null;
+    lobbyState = null;
+    lobbyKey = null;
     UI.renderLobby(state);
   };
 
   UI.closeLobby = function () {
     lobbyOpen = false;
-    homeNodes = null;
     lobbyState = null;
+    lobbyKey = null;
+    lobbyBackdrop = null;
+    UI.closeZombieChooser();
     closeModal();
   };
 
-  // Full re-render (e.g. after a language change), keeping typed values.
   UI.rebuildLobby = function (state) {
-    if (!lobbyOpen) return;
-    if (homeNodes && state.view === 'home') {
-      state.name = homeNodes.name.value;
-      state.code = homeNodes.code.value;
-    }
-    homeNodes = null;
-    lobbyState = null;
-    UI.renderLobby(state);
+    if (lobbyOpen) UI.renderLobby(state, true);
   };
 
-  UI.renderLobby = function (state) {
+  // Re-rendering keeps what the player typed, the focus and scroll positions:
+  // inputs carry data-k, scrollable areas data-scroll.
+  function snapshot() {
+    var snap = { values: {}, scroll: {}, focus: null };
+    if (!layers || !layers.modal) return snap;
+    layers.modal.querySelectorAll('[data-k]').forEach(function (i) {
+      snap.values[i.getAttribute('data-k')] = i.value;
+      if (document.activeElement === i) snap.focus = i.getAttribute('data-k');
+    });
+    layers.modal.querySelectorAll('[data-scroll]').forEach(function (s) {
+      snap.scroll[s.getAttribute('data-scroll')] = s.scrollTop;
+    });
+    return snap;
+  }
+
+  function restore(snap) {
+    layers.modal.querySelectorAll('[data-k]').forEach(function (i) {
+      var k = i.getAttribute('data-k');
+      if (snap.values[k] != null && !i.readOnly) i.value = snap.values[k];
+      if (snap.focus === k) i.focus();
+    });
+    layers.modal.querySelectorAll('[data-scroll]').forEach(function (s) {
+      var k = s.getAttribute('data-scroll');
+      if (snap.scroll[k] != null) s.scrollTop = snap.scroll[k];
+    });
+  }
+
+  var lobbyKey = null;
+  var lobbyBackdrop = null;
+
+  UI.renderLobby = function (state, force) {
     if (!lobbyOpen || !root) return;
-    var prevView = lobbyState && lobbyState.view;
+    // Nothing visible changed (e.g. a room list refresh with the same rooms):
+    // keep the DOM as is, so nothing flickers.
+    var key = MP.lang + '|' + (MP.cards && MP.cards.ready) + '|' + JSON.stringify(state);
+    var mounted = lobbyBackdrop && lobbyBackdrop.isConnected;
+    if (!force && mounted && key === lobbyKey) return;
+    lobbyKey = key;
+    var sameView = lobbyState && lobbyState.view === state.view && lobbyState.tab === state.tab;
+    var snap = sameView ? snapshot() : null;
     lobbyState = state;
-    if (state.view === 'home' && prevView === 'home' && homeNodes) {
-      homeNodes.error.textContent = state.error ? t(state.error) : '';
-      return;
-    }
-    homeNodes = null;
-    var win = el('div.mp-window.mp-interactive');
+    var win = el('div.mp-window.mp-interactive' + (state.view === 'home' || state.view === 'account' ? '.mp-home-window' : ''));
     var close = el('button.mp-close', { title: t('close'), 'aria-label': t('close'), onclick: function () {
       call('closeLobby');
     } });
@@ -212,27 +241,68 @@
       );
     });
     win.appendChild(langs);
-    win.appendChild(el('div.mp-window-title', { text: t('lobby_title') }));
-    if (state.view === 'home') renderHome(win, state);
+    win.appendChild(el('div.mp-window-title', { text: state.view === 'account' ? t('account_title') : t('lobby_title') }));
+    if (state.view === 'account') {
+      var body = el('div.mp-tab-body');
+      win.appendChild(body);
+      renderAccountTab(body, state);
+    } else if (state.view === 'home') renderHome(win, state);
     else if (state.view === 'busy') renderBusy(win, state);
     else renderRoom(win, state);
-    var bd = openModal(win);
-    bd.addEventListener('mousedown', function (e) {
-      e.stopPropagation();
-    });
-    bd.addEventListener('wheel', function (e) {
-      e.stopPropagation();
-    });
+    if (mounted && lobbyBackdrop.parentNode === layers.modal) {
+      // Update in place: same backdrop, no open animation, no flash.
+      lobbyBackdrop.classList.add('mp-steady');
+      lobbyBackdrop.replaceChildren(win);
+    } else {
+      var bd = openModal(win);
+      bd.addEventListener('mousedown', function (e) {
+        e.stopPropagation();
+      });
+      bd.addEventListener('wheel', function (e) {
+        e.stopPropagation();
+      });
+      lobbyBackdrop = bd;
+    }
+    if (snap) restore(snap);
   };
 
-  function renderHome(win, state) {
-    win.appendChild(el('div.mp-window-sub', { text: t('lobby_subtitle') }));
-    var name = el('input.mp-input', { maxlength: 16, placeholder: t('your_name'), value: state.name || '', 'aria-label': t('your_name') });
-    MP.util.shieldInput(name);
-    win.appendChild(el('div.mp-name-row', null, [el('div.mp-avatar'), name]));
+  function input(cls, attrs) {
+    var i = el('input.mp-input' + (cls ? '.' + cls : ''), attrs);
+    MP.util.shieldInput(i);
+    return i;
+  }
 
-    var code = el('input.mp-input.mp-code', { maxlength: 5, placeholder: t('room_code_ph'), value: state.code || '', 'aria-label': t('room_code') });
-    MP.util.shieldInput(code);
+  var TABS = ['play', 'rooms', 'history', 'account'];
+
+  function renderHome(win, state) {
+    var tabs = el('div.mp-tabs');
+    TABS.forEach(function (k) {
+      tabs.appendChild(
+        el('button.mp-tab' + (state.tab === k ? '.mp-on' : ''), {
+          text: t('tab_' + k),
+          onclick: function () {
+            if (state.tab !== k) call('tab', k);
+          },
+        }),
+      );
+    });
+    win.appendChild(tabs);
+    var body = el('div.mp-tab-body');
+    win.appendChild(body);
+    if (state.tab === 'rooms') renderRoomsTab(body, state);
+    else if (state.tab === 'history') renderHistoryTab(body, state);
+    else if (state.tab === 'account') renderAccountTab(body, state);
+    else renderPlayTab(body, state);
+  }
+
+  function renderPlayTab(body, state) {
+    body.appendChild(el('div.mp-window-sub', { text: t('lobby_subtitle') }));
+    var name = input(null, { 'data-k': 'name', maxlength: 20, placeholder: t('your_name'), value: state.name || '', 'aria-label': t('your_name'), readonly: state.nameLocked });
+    var row = el('div.mp-name-row', null, [el('div.mp-avatar'), name]);
+    if (state.nameLocked) row.appendChild(el('span.mp-verified', { title: t('account_verified'), text: '✓' }));
+    body.appendChild(row);
+
+    var code = input('mp-code', { 'data-k': 'code', maxlength: 5, placeholder: t('room_code_ph'), value: state.code || '', 'aria-label': t('room_code') });
     code.addEventListener('input', function () {
       code.value = code.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
     });
@@ -245,25 +315,490 @@
     code.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') join.click();
     });
-
-    var left = el('div.mp-panel', null, [
-      el('div.mp-panel-title', { text: t('create_room') }),
-      el('div.mp-home-desc', { text: t('share_code') }),
-      create,
-    ]);
-    var right = el('div.mp-panel', null, [
-      el('div.mp-panel-title', { text: t('room_code') }),
-      code,
-      join,
-    ]);
-    win.appendChild(el('div.mp-home', null, [left, el('div.mp-home-or', { text: t('or') }), right]));
-    var error = el('div.mp-error', { text: state.error ? t(state.error) : '' });
-    win.appendChild(error);
-    homeNodes = { name: name, code: code, error: error };
+    var left = el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('create_room') }), el('div.mp-home-desc', { text: t('share_code') }), create]);
+    var right = el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('room_code') }), code, join]);
+    body.appendChild(el('div.mp-home', null, [left, el('div.mp-home-or', { text: t('or') }), right]));
+    body.appendChild(el('div.mp-error', { text: state.error ? t(state.error) : '' }));
+    if (!state.nameLocked && state.online) {
+      body.appendChild(
+        el('div.mp-note.mp-center', null, [
+          t('login_hint') + ' ',
+          el('a.mp-link', { href: '#', text: t('tab_account'), onclick: function (e) {
+            e.preventDefault();
+            call('tab', 'account');
+          } }),
+        ]),
+      );
+    }
     setTimeout(function () {
-      (state.code ? code : name).focus();
+      if (!document.activeElement || document.activeElement === document.body) (state.code ? code : name).focus();
     }, 50);
   }
+
+  function offlineNotice(body) {
+    body.appendChild(
+      el('div.mp-panel.mp-empty-state', null, [el('div.mp-empty-title', { text: t('online_unavailable') }), el('div.mp-note', { text: t('online_unavailable_desc') })]),
+    );
+  }
+
+  function timeAgo(ts) {
+    var s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    if (s < 60) return t('ago_s', { n: s });
+    if (s < 3600) return t('ago_m', { n: Math.floor(s / 60) });
+    if (s < 86400) return t('ago_h', { n: Math.floor(s / 3600) });
+    return t('ago_d', { n: Math.floor(s / 86400) });
+  }
+
+  function stageLabel(k) {
+    return MP.STAGES[k] ? t(MP.STAGES[k].label) : '';
+  }
+
+  function renderRoomsTab(body, state) {
+    if (!state.online) return offlineNotice(body);
+    var r = state.rooms;
+    var head = el('div.mp-list-head', null, [
+      el('div.mp-panel-title', { text: t('public_rooms') }),
+      el('button.mp-btn.mp-small.mp-brown', { text: r.loading ? t('loading') : t('refresh'), disabled: r.loading, onclick: function () {
+        call('refreshRooms');
+      } }),
+    ]);
+    var list = el('div.mp-list.mp-scroll', { 'data-scroll': 'rooms' });
+    if (r.error) list.appendChild(el('div.mp-error', { text: t(r.error) }));
+    else if (!r.list.length) list.appendChild(el('div.mp-empty-state', null, [el('div.mp-empty-title', { text: r.loading ? t('loading') : t('no_rooms') }), el('div.mp-note', { text: t('no_rooms_desc') })]));
+    r.list.forEach(function (room) {
+      var full = room.players >= room.max || room.status === 'playing';
+      var item = el('div.mp-list-item', null, [
+        iconEl(room.mode || 'coop', 'mp-list-icon'),
+        el('div.mp-list-main', null, [
+          el('div.mp-list-title', null, [room.host + ' ', room.hasAccount ? el('span.mp-verified', { text: '✓', title: t('account_verified') }) : null]),
+          el('div.mp-list-sub', { text: t('mode_' + room.mode) + (room.mode !== 'coop' && room.stage ? ' • ' + stageLabel(room.stage) : '') + ' • ' + room.code }),
+        ]),
+        el('div.mp-list-meta', null, [
+          el('span.mp-player-tag' + (room.status === 'playing' ? '' : '.mp-ok'), { text: room.status === 'playing' ? t('status_playing') : t('status_waiting') }),
+          el('div.mp-list-sub', { text: room.players + '/' + room.max }),
+        ]),
+        el('button.mp-btn.mp-small' + (full ? '.mp-brown' : '.mp-green'), {
+          text: t('join_room'),
+          disabled: full,
+          onclick: function () {
+            call('joinRoom', room.code);
+          },
+        }),
+      ]);
+      list.appendChild(item);
+    });
+    body.appendChild(el('div.mp-panel.mp-list-panel', null, [head, list]));
+    body.appendChild(el('div.mp-error', { text: state.error ? t(state.error) : '' }));
+  }
+
+  function renderHistoryTab(body, state) {
+    if (!state.online) return offlineNotice(body);
+    var h = state.history;
+    var filters = el('div.mp-seg', null, [
+      el('button' + (!h.mine ? '.mp-on' : ''), { text: t('history_all'), onclick: function () {
+        call('refreshHistory', false);
+      } }),
+      el('button' + (h.mine ? '.mp-on' : ''), { text: t('history_mine'), disabled: !state.user, title: state.user ? null : t('login_needed'), onclick: function () {
+        call('refreshHistory', true);
+      } }),
+    ]);
+    var head = el('div.mp-list-head', null, [el('div.mp-panel-title', { text: t('recent_matches') }), filters]);
+    var historyList = el('div.mp-list.mp-scroll', { 'data-scroll': 'history' });
+    if (h.error) historyList.appendChild(el('div.mp-error', { text: t(h.error) }));
+    else if (!h.list.length) historyList.appendChild(el('div.mp-empty-state', null, [el('div.mp-empty-title', { text: h.loading ? t('loading') : t('no_matches') })]));
+    h.list.forEach(function (m) {
+      var players = el('div.mp-match-players');
+      var list = m.players.slice();
+      if (m.mode === 'versus') {
+        list.sort(function (a, b) {
+          return (a.side === 'plants' ? 0 : 1) - (b.side === 'plants' ? 0 : 1);
+        });
+      }
+      list.forEach(function (p, i) {
+        if (i) players.appendChild(el('span.mp-vs', { text: m.mode === 'versus' && p.side !== list[i - 1].side ? t('vs') : '+' }));
+        var detail = m.mode === 'versus' ? t('side_' + p.side) : m.mode === 'survival' ? t('wave_short', { n: p.score }) : '';
+        players.appendChild(
+          el('span.mp-match-player' + (p.win ? '.mp-winner' : ''), null, [
+            p.win ? '🏆 ' : '',
+            p.name,
+            p.account ? el('span.mp-verified', { text: '✓' }) : null,
+            detail ? el('small', { text: ' (' + detail + ')' }) : null,
+          ]),
+        );
+      });
+      historyList.appendChild(
+        el('div.mp-list-item', null, [
+          iconEl(m.mode || 'coop', 'mp-list-icon'),
+          el('div.mp-list-main', null, [players, el('div.mp-list-sub', { text: t('mode_' + m.mode) + (m.stage ? ' • ' + stageLabel(m.stage) : '') + ' • ' + MP.util.formatTime(m.duration) })]),
+          el('div.mp-list-meta', null, [el('div.mp-list-sub', { text: timeAgo(m.at) })]),
+        ]),
+      );
+    });
+    body.appendChild(el('div.mp-panel.mp-list-panel', null, [head, historyList]));
+  }
+
+  function renderAccountTab(outer, state) {
+    var body = el('div.mp-account-scroll.mp-scroll', { 'data-scroll': 'account' });
+    outer.appendChild(body);
+    if (!state.online) {
+      offlineNotice(body);
+      renderSaveTools(body, state);
+      return;
+    }
+    var acc = state.account;
+    var user = state.user;
+    if (!user) {
+      var reg = acc.mode === 'register';
+      var u = input(null, { 'data-k': 'acc-user', maxlength: 20, placeholder: t('username'), autocomplete: 'username' });
+      var p = input(null, { 'data-k': 'acc-pass', type: 'password', maxlength: 128, placeholder: t('password'), autocomplete: reg ? 'new-password' : 'current-password' });
+      var p2 = reg ? input(null, { 'data-k': 'acc-pass2', type: 'password', maxlength: 128, placeholder: t('password_repeat'), autocomplete: 'new-password' }) : null;
+      var submit = el('button.mp-btn.mp-big' + (reg ? '.mp-green' : ''), {
+        text: acc.busy ? t('loading') : reg ? t('register') : t('login'),
+        disabled: acc.busy,
+        onclick: function () {
+          call('accountSubmit', reg ? 'register' : 'login', u.value.trim(), p.value, p2 ? p2.value : '');
+        },
+      });
+      [u, p, p2].forEach(function (i) {
+        if (i)
+          i.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') submit.click();
+          });
+      });
+      var form = el('div.mp-panel.mp-account-form', null, [
+        el('div.mp-seg.mp-account-switch', null, [
+          el('button' + (!reg ? '.mp-on' : ''), { text: t('login'), onclick: function () {
+            call('accountMode', 'login');
+          } }),
+          el('button' + (reg ? '.mp-on' : ''), { text: t('register'), onclick: function () {
+            call('accountMode', 'register');
+          } }),
+        ]),
+        el('div.mp-field', null, [el('label.mp-label', { text: t('username') }), u]),
+        el('div.mp-field', null, [el('label.mp-label', { text: t('password') }), p]),
+        p2 ? el('div.mp-field', null, [el('label.mp-label', { text: t('password_repeat') }), p2]) : null,
+        submit,
+        el('div.mp-error', { text: acc.error ? t(acc.error, acc.errorVars) : '' }),
+        !reg ? el('div.mp-note.mp-center', { text: t('forgot_password') }) : null,
+      ]);
+      var why = el('div.mp-panel.mp-account-why', null, [
+        el('div.mp-panel-title', { text: t('account_why') }),
+        el('ul.mp-bullets', null, [el('li', { text: t('account_why_1') }), el('li', { text: t('account_why_2') }), el('li', { text: t('account_why_3') })]),
+      ]);
+      body.appendChild(el('div.mp-account', null, [form, why]));
+      renderSaveTools(body, state);
+      setTimeout(function () {
+        if (!document.activeElement || document.activeElement === document.body) u.focus();
+      }, 50);
+      return;
+    }
+    var st = user.stats || {};
+    var stat = function (label, value) {
+      return el('div.mp-stat', null, [el('div.mp-stat-v', { text: String(value || 0) }), el('div.mp-stat-l', { text: label })]);
+    };
+    var profile = el('div.mp-panel', null, [
+      el('div.mp-account-name', null, [
+        el('div.mp-avatar'),
+        el('span', { text: user.username }),
+        el('span.mp-verified', { text: '✓' }),
+        user.admin ? el('span.mp-player-tag.mp-host', { text: t('admin_badge') }) : null,
+      ]),
+      el('div.mp-note', { text: t('member_since', { date: new Date(user.createdAt).toLocaleDateString() }) }),
+      el('div.mp-stats-grid', null, [stat(t('stat_matches'), st.matches), stat(t('stat_wins'), st.wins), stat(t('stat_versus_wins'), st.versusWins), stat(t('stat_best_wave'), st.bestWave)]),
+      acc.changing ? passwordForm(acc) : null,
+      el('div.mp-account-actions', null, [
+        acc.changing
+          ? null
+          : el('button.mp-btn.mp-small.mp-brown', { text: t('change_password'), onclick: function () {
+              call('passwordMode', true);
+            } }),
+        el('button.mp-btn.mp-small.mp-red', { text: t('logout'), onclick: function () {
+          call('logout');
+        } }),
+      ]),
+    ]);
+    var c = state.cloud;
+    var statusText = c.status === 'syncing' ? t('cloud_syncing') : c.status === 'conflict' ? t('cloud_conflict_short') : c.status === 'error' || c.status === 'offline' ? t('cloud_error') : c.lastSync ? t('cloud_synced_at', { when: timeAgo(c.lastSync) }) : t('cloud_never');
+    var cloud = el('div.mp-panel', null, [
+      el('div.mp-panel-title', { text: t('cloud_title') }),
+      el('div.mp-cloud-status.mp-cloud-' + c.status, { text: statusText }),
+      el('div.mp-note', { text: t('cloud_desc') }),
+      el('div.mp-account-actions', null, [
+        el('button.mp-btn.mp-small.mp-green', { text: t('cloud_sync_now'), disabled: c.status === 'syncing', onclick: function () {
+          call('cloudSync');
+        } }),
+        el('button.mp-btn.mp-small.mp-brown', { text: t('cloud_download'), disabled: c.status === 'syncing', onclick: function () {
+          call('cloudDownload');
+        } }),
+      ]),
+    ]);
+    body.appendChild(el('div.mp-account', null, [profile, cloud]));
+    if (acc.notice) body.appendChild(el('div.mp-status', { text: t(acc.notice) }));
+    renderSaveTools(body, state);
+    if (user.admin) renderAdminPanel(body, state);
+  }
+
+  function passwordForm(acc) {
+    var cur = input(null, { 'data-k': 'pw-cur', type: 'password', maxlength: 128, placeholder: t('current_password'), autocomplete: 'current-password' });
+    var n1 = input(null, { 'data-k': 'pw-new', type: 'password', maxlength: 128, placeholder: t('new_password'), autocomplete: 'new-password' });
+    var n2 = input(null, { 'data-k': 'pw-new2', type: 'password', maxlength: 128, placeholder: t('password_repeat'), autocomplete: 'new-password' });
+    var save = el('button.mp-btn.mp-small.mp-green', {
+      text: acc.busy ? t('loading') : t('change_password'),
+      disabled: acc.busy,
+      onclick: function () {
+        call('changePassword', cur.value, n1.value, n2.value);
+      },
+    });
+    [cur, n1, n2].forEach(function (i) {
+      i.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') save.click();
+      });
+    });
+    return el('div.mp-account-form.mp-password-form', null, [
+      cur,
+      n1,
+      n2,
+      el('div.mp-account-actions', null, [
+        save,
+        el('button.mp-btn.mp-small.mp-brown', { text: t('editor_cancel'), onclick: function () {
+          call('passwordMode', false);
+        } }),
+      ]),
+      el('div.mp-error', { text: acc.error ? t(acc.error, acc.errorVars) : '' }),
+    ]);
+  }
+
+  /* -------------------------------------------------------- save tools */
+
+  function renderSaveTools(body, state) {
+    var sv = state.saves || {};
+    var actions = el('div.mp-account-actions', null, [
+      el('button.mp-btn.mp-small.mp-green', { text: t('save_export'), onclick: function () {
+        call('exportSave');
+      } }),
+      sv.canImport
+        ? el('button.mp-btn.mp-small.mp-brown', { text: t('save_import'), onclick: function () {
+            call('importSave');
+          } })
+        : null,
+      sv.canEdit
+        ? el('button.mp-btn.mp-small.mp-blue', { text: t('save_edit'), onclick: function () {
+            call('editSave');
+          } })
+        : null,
+    ]);
+    var profiles = (sv.profiles || []).join(', ');
+    body.appendChild(
+      el('div.mp-panel.mp-save-panel', null, [
+        el('div.mp-panel-title', { text: t('save_title') }),
+        el('div.mp-note', { text: t('save_desc') + (profiles ? ' (' + profiles + ')' : '') }),
+        actions,
+        !sv.canEdit ? el('div.mp-note', { text: t('save_admin_only') }) : null,
+      ]),
+    );
+  }
+
+  function renderAdminPanel(body, state) {
+    var a = state.adminList || { q: '', list: [], loading: false };
+    var q = input(null, { 'data-k': 'admin-q', maxlength: 20, placeholder: t('admin_search'), value: a.q || '' });
+    var timer = null;
+    q.addEventListener('input', function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        call('adminSearch', q.value.trim());
+      }, 350);
+    });
+    var list = el('div.mp-list.mp-admin-list');
+    if (a.error) list.appendChild(el('div.mp-error', { text: t(a.error) }));
+    else if (!a.list.length) list.appendChild(el('div.mp-note.mp-center', { text: a.loading ? t('loading') : t('admin_empty') }));
+    a.list.forEach(function (u) {
+      list.appendChild(
+        el('div.mp-list-item', null, [
+          el('div.mp-list-main', null, [
+            el('div.mp-list-title', null, [u.username, u.admin ? el('span.mp-player-tag.mp-host', { text: t('admin_badge') }) : null]),
+            el('div.mp-list-sub', { text: u.save ? timeAgo(u.save.updatedAt) + ' • ' + Math.max(1, Math.round(u.save.size / 1024)) + ' KB' : t('admin_no_save') }),
+          ]),
+          el('button.mp-btn.mp-small.mp-brown', { text: t('admin_password'), onclick: function () {
+            call('adminPassword', u.username);
+          } }),
+          el('button.mp-btn.mp-small.mp-brown', { text: t('admin_export'), disabled: !u.save, onclick: function () {
+            call('adminExport', u.username);
+          } }),
+          el('button.mp-btn.mp-small.mp-blue', { text: t('admin_edit'), disabled: !u.save, onclick: function () {
+            call('adminEdit', u.username);
+          } }),
+        ]),
+      );
+    });
+    body.appendChild(el('div.mp-panel.mp-save-panel', null, [el('div.mp-panel-title', { text: t('admin_title') }), q, list]));
+  }
+
+  /* ------------------------------------------------ main menu account */
+
+  var menuChip = null;
+  var menuKey = '';
+  UI.renderMenuAccount = function (info) {
+    if (!root) return;
+    if (!info) {
+      if (menuChip) menuChip.remove();
+      menuChip = null;
+      menuKey = '';
+      return;
+    }
+    if (!menuChip) {
+      menuChip = el('button.mp-menu-account', { onclick: function () {
+        call('openAccount');
+      } }, [el('span.mp-menu-account-icon'), el('span.mp-menu-account-text'), el('span.mp-menu-account-dot')]);
+      root.insertBefore(menuChip, layers.toasts);
+    }
+    var key = [Math.round(info.left), Math.round(info.top), Math.round(info.height), info.text, info.status, MP.lang].join('|');
+    if (key === menuKey) return;
+    menuKey = key;
+    var st = menuChip.style;
+    st.left = info.left + 'px';
+    st.top = info.top + 'px';
+    st.height = info.height + 'px';
+    st.fontSize = Math.max(12, info.height * 0.42) + 'px';
+    menuChip.querySelector('.mp-menu-account-text').textContent = info.text;
+    menuChip.className = 'mp-menu-account mp-cloud-' + info.status;
+    menuChip.title = t('account_title');
+  };
+
+  /* --------------------------------------------------------- save editor */
+
+  // opts: { title, source, blob: {players, settings}, saveLabel, onSave(blob) }
+  UI.openSaveEditor = function (opts) {
+    var profiles;
+    try {
+      profiles = JSON.parse(opts.blob.players);
+    } catch (e) {
+      profiles = [];
+    }
+    if (!Array.isArray(profiles) || !profiles.length) {
+      UI.toast(t('editor_no_profiles'), 'warn');
+      return;
+    }
+    UI.closeSaveEditor();
+    var idx = 0;
+    var win = el('div.mp-window.mp-zchooser.mp-save-editor.mp-interactive');
+    var bd = el('div.mp-backdrop.mp-dialog-layer', null, win);
+    ['mousedown', 'wheel', 'keydown'].forEach(function (ev) {
+      bd.addEventListener(ev, function (e) {
+        e.stopPropagation();
+      });
+    });
+    var rawError = el('div.mp-error');
+    var raw = el('textarea.mp-input.mp-raw', { spellcheck: 'false' });
+    MP.util.shieldInput(raw);
+    var tabs = el('div.mp-seg');
+    var nums = el('div.mp-editor-nums');
+
+    function commitRaw() {
+      try {
+        var o = JSON.parse(raw.value);
+        if (!o || typeof o !== 'object' || Array.isArray(o)) throw new Error('{ }');
+        profiles[idx] = o;
+        rawError.textContent = '';
+        return true;
+      } catch (e) {
+        rawError.textContent = t('editor_raw_bad', { msg: e.message });
+        return false;
+      }
+    }
+
+    function render() {
+      var p = profiles[idx];
+      tabs.innerHTML = '';
+      profiles.forEach(function (pr, i) {
+        tabs.appendChild(
+          el('button' + (i === idx ? '.mp-on' : ''), {
+            text: pr.name || '#' + (i + 1),
+            onclick: function () {
+              if (i === idx || !commitRaw()) return;
+              idx = i;
+              render();
+            },
+          }),
+        );
+      });
+      nums.innerHTML = '';
+      MP.saves.NUMBERS.forEach(function (n) {
+        var inp = el('input.mp-input', { type: 'number', min: 0, max: n.max, value: String(Number(p[n.key]) || 0) });
+        MP.util.shieldInput(inp);
+        inp.addEventListener('input', function () {
+          var v = Math.max(0, Math.min(n.max, Math.floor(Number(inp.value) || 0)));
+          p[n.key] = v;
+          raw.value = JSON.stringify(p, null, 1);
+        });
+        nums.appendChild(el('label.mp-field', null, [el('span.mp-label', { text: t(n.label) }), inp]));
+      });
+      raw.value = JSON.stringify(p, null, 1);
+      rawError.textContent = '';
+    }
+
+    var quick = el('div.mp-account-actions');
+    Object.keys(MP.saves.ACTIONS).forEach(function (k) {
+      quick.appendChild(
+        el('button.mp-btn.mp-small.mp-brown', {
+          text: t(MP.saves.ACTION_LABELS[k]),
+          onclick: function () {
+            if (!commitRaw()) return;
+            MP.saves.ACTIONS[k](profiles[idx]);
+            render();
+            UI.toast(t('editor_done', { what: t(MP.saves.ACTION_LABELS[k]) }), 'good', 2500);
+          },
+        }),
+      );
+    });
+    raw.addEventListener('change', commitRaw);
+
+    var saveBtn = el('button.mp-btn.mp-green.mp-big', {
+      text: opts.saveLabel || t('editor_save'),
+      onclick: function () {
+        if (!commitRaw()) return;
+        saveBtn.disabled = true;
+        Promise.resolve(opts.onSave({ players: JSON.stringify(profiles), settings: opts.blob.settings || null })).then(
+          function (keepOpen) {
+            if (!keepOpen) UI.closeSaveEditor();
+            else saveBtn.disabled = false;
+          },
+          function () {
+            saveBtn.disabled = false;
+          },
+        );
+      },
+    });
+
+    win.appendChild(el('button.mp-close', { title: t('close'), onclick: function () {
+      UI.closeSaveEditor();
+    } }));
+    win.appendChild(el('div.mp-window-title', { text: t('editor_title') }));
+    win.appendChild(el('div.mp-window-sub', { text: opts.source || '' }));
+    var body = el('div.mp-editor-body.mp-scroll', null, [
+      el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('editor_profile') }), tabs]),
+      el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('editor_values') }), nums]),
+      el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('editor_quick') }), quick]),
+      el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('editor_raw') }), raw, rawError]),
+    ]);
+    win.appendChild(body);
+    win.appendChild(
+      el('div.mp-results-actions', null, [
+        el('button.mp-btn.mp-brown', { text: t('editor_cancel'), onclick: function () {
+          UI.closeSaveEditor();
+        } }),
+        saveBtn,
+      ]),
+    );
+    root.appendChild(bd);
+    editorNode = bd;
+    render();
+  };
+
+  var editorNode = null;
+  UI.closeSaveEditor = function () {
+    if (editorNode) editorNode.remove();
+    editorNode = null;
+  };
 
   function renderBusy(win, state) {
     win.appendChild(
@@ -301,11 +836,285 @@
     return box;
   }
 
+  function optionLabel(def, v) {
+    if (def.fmt === 'minutes') return t('minutes', { n: v });
+    if (def.fmt === 'waves_n') return t('waves_n', { n: v });
+    if (def.fmt === 'mult') return v + 'x';
+    if (def.fmt) return t(def.fmt + v);
+    return String(v);
+  }
+
+  // One zombie seed packet: the game's own artwork plus brain cost.
+  function zombiePacket(type, opts) {
+    opts = opts || {};
+    var c = MP.zombieCost(type);
+    var art = MP.cards && MP.cards.zombie(type);
+    var node = el(
+      (opts.button ? 'button' : 'div') + '.mp-zpacket' + (opts.cls ? '.' + opts.cls : '') + (art ? '' : '.mp-noart'),
+      { title: MP.zombieName(type), 'data-type': type, disabled: opts.disabled, onclick: opts.onclick || null },
+      [
+        el('img.mp-zpacket-art', { src: art || null, alt: '', draggable: 'false' }),
+        el('span.mp-zpacket-name', { text: MP.zombieName(type) }),
+        el('span.mp-zpacket-cost', null, [iconEl('brain', 'mp-zchip-brain'), String(c.cost)]),
+        opts.n ? el('span.mp-zchip-n', { text: String(opts.n) }) : null,
+      ],
+    );
+    return node;
+  }
+  UI.zombiePacket = zombiePacket;
+
+  // Artwork finished drawing: fill every packet of that zombie on screen.
+  UI.fillZombieArt = function (type, url) {
+    if (!root) return;
+    root.querySelectorAll('.mp-zpacket.mp-noart[data-type="' + type + '"]').forEach(function (p) {
+      var img = p.querySelector('.mp-zpacket-art');
+      if (img) img.src = url;
+      p.classList.remove('mp-noart');
+    });
+  };
+
+  // The current deck as a row of packets (read-only in the room).
+  function renderDeck(state, s) {
+    var deck = s.zdeck || [];
+    var row = el('div.mp-zdeck-row');
+    for (var i = 0; i < MP.DECK_SIZE; i++) {
+      row.appendChild(deck[i] ? zombiePacket(deck[i], { n: i + 1 }) : el('div.mp-zpacket.mp-empty-slot'));
+    }
+    var box = el('div.mp-zdeck', null, [row]);
+    if (state.canEditDeck) {
+      box.appendChild(
+        el('button.mp-btn.mp-small.mp-green', {
+          text: t('choose_zombies'),
+          onclick: function () {
+            call('openZombieChooser');
+          },
+        }),
+      );
+    }
+    return box;
+  }
+
+  /* ------------------------------------------------ zombie seed chooser */
+
+  // Big window like the game's seed chooser: chosen packets on top, every
+  // available zombie below, filtered by world.
+  var chooser = null;
+  var chooserWorld = 'all';
+
+  UI.isZombieChooserOpen = function () {
+    return !!chooser;
+  };
+
+  UI.openZombieChooser = function (opts) {
+    UI.closeZombieChooser();
+    chooser = { opts: opts };
+    var win = el('div.mp-window.mp-zchooser.mp-interactive');
+    win.appendChild(el('button.mp-close', { title: t('close'), onclick: function () {
+      UI.closeZombieChooser();
+    } }));
+    win.appendChild(el('div.mp-window-title', { text: t('choose_zombies') }));
+    win.appendChild(el('div.mp-window-sub', { text: t('choose_zombies_desc', { n: MP.DECK_SIZE }) }));
+    var bank = el('div.mp-zbank');
+    var tabs = el('div.mp-seg.mp-ztabs');
+    var grid = el('div.mp-zgrid.mp-scroll');
+    var footer = el('div.mp-results-actions', null, [
+      el('button.mp-btn.mp-brown', { text: t('reset_deck'), onclick: function () {
+        call('resetDeck');
+      } }),
+      el('button.mp-btn.mp-green.mp-big', { text: t('done'), onclick: function () {
+        UI.closeZombieChooser();
+      } }),
+    ]);
+    win.appendChild(el('div.mp-panel', null, [bank]));
+    win.appendChild(el('div.mp-panel.mp-zgrid-panel', null, [tabs, grid]));
+    win.appendChild(footer);
+    var bd = el('div.mp-backdrop.mp-dialog-layer', null, win);
+    bd.addEventListener('mousedown', function (e) {
+      e.stopPropagation();
+    });
+    bd.addEventListener('wheel', function (e) {
+      e.stopPropagation();
+    });
+    root.appendChild(bd);
+    chooser.node = bd;
+    chooser.bank = bank;
+    chooser.tabs = tabs;
+    chooser.grid = grid;
+    renderChooserTabs();
+    renderChooserGrid();
+    UI.updateZombieChooser(opts.deck);
+  };
+
+  function renderChooserTabs() {
+    var c = chooser;
+    var worlds = [];
+    c.opts.choices.forEach(function (z) {
+      if (worlds.indexOf(z.world) < 0) worlds.push(z.world);
+    });
+    if (worlds.indexOf(chooserWorld) < 0) chooserWorld = 'all';
+    c.tabs.innerHTML = '';
+    ['all'].concat(worlds).forEach(function (w) {
+      c.tabs.appendChild(
+        el('button' + (w === chooserWorld ? '.mp-on' : ''), {
+          text: w === 'all' ? t('world_all') : worldLabel(w),
+          onclick: function () {
+            chooserWorld = w;
+            renderChooserTabs();
+            renderChooserGrid();
+          },
+        }),
+      );
+    });
+  }
+
+  function renderChooserGrid() {
+    var c = chooser;
+    c.grid.innerHTML = '';
+    c.grid.scrollTop = 0;
+    var shown = [];
+    c.opts.choices.forEach(function (z) {
+      if (chooserWorld !== 'all' && z.world !== chooserWorld) return;
+      shown.push(z.type);
+      c.grid.appendChild(
+        zombiePacket(z.type, {
+          button: true,
+          onclick: function () {
+            call('toggleDeck', z.type);
+          },
+        }),
+      );
+    });
+    if (MP.cards && MP.cards.prioritize) MP.cards.prioritize(shown);
+    markChosen();
+  }
+
+  function markChosen() {
+    var deck = chooser.deck || [];
+    chooser.grid.querySelectorAll('.mp-zpacket').forEach(function (p) {
+      p.classList.toggle('mp-chosen', deck.indexOf(p.getAttribute('data-type')) >= 0);
+    });
+  }
+
+  UI.updateZombieChooser = function (deck) {
+    if (!chooser) return;
+    chooser.deck = (deck || []).slice();
+    chooser.bank.innerHTML = '';
+    for (var i = 0; i < MP.DECK_SIZE; i++) {
+      var type = chooser.deck[i];
+      chooser.bank.appendChild(
+        type
+          ? zombiePacket(type, {
+              button: true,
+              n: i + 1,
+              onclick: (function (ty) {
+                return function () {
+                  call('toggleDeck', ty);
+                };
+              })(type),
+            })
+          : el('div.mp-zpacket.mp-empty-slot'),
+      );
+    }
+    markChosen();
+  };
+
+  // New packet artwork became available (lazy load): redraw in place.
+  UI.refreshZombieArt = function () {
+    if (!chooser) return;
+    renderChooserGrid();
+    UI.updateZombieChooser(chooser.deck);
+  };
+
+  UI.closeZombieChooser = function () {
+    if (chooser && chooser.node) chooser.node.remove();
+    chooser = null;
+  };
+
+  /* ------------------------------------------------ co-op level picker */
+
+  function worldLabel(w) {
+    var key = 'world_' + w;
+    var s = t(key);
+    return s === key ? w : s;
+  }
+
+  UI.levelLabel = function (key) {
+    var f = MP.findLevel(key);
+    return f ? t('coop_selected', { world: worldLabel(f.world), n: f.level.label }) : t('coop_map');
+  };
+
+  var coopWorld = null; // world tab shown in the picker (host side)
+
+  function renderCoopLevel(opts, opt, state, s, edit) {
+    var picked = MP.findLevel(s.coopLevel);
+    opt(
+      t('coop_level'),
+      segment(
+        [
+          { value: 'map', label: t('coop_map') },
+          { value: 'pick', label: t('coop_pick') },
+        ],
+        picked ? 'pick' : 'map',
+        !edit,
+        function (v) {
+          if (v === 'map') call('setting', 'coopLevel', 'map');
+          else if (!picked) call('setting', 'coopLevel', (coopWorld || 'egypt') + ':1');
+        },
+      ),
+    );
+    if (!picked) {
+      opts.appendChild(el('div.mp-note', { text: t('coop_map_desc') }));
+      if (state.mapLocked) opts.appendChild(el('div.mp-warn-box', { text: t('coop_map_locked') }));
+      opts.appendChild(el('div.mp-note', { text: t('coop_options_note') }));
+      return;
+    }
+    opts.appendChild(el('div.mp-coop-selected', { text: UI.levelLabel(s.coopLevel) }));
+    opts.appendChild(el('div.mp-note', { text: t('coop_pick_desc') }));
+    if (!edit) return;
+    if (!coopWorld || !MP.LEVELS.some(function (w) {
+      return w.world === coopWorld;
+    })) coopWorld = picked.world;
+    opt(
+      t('coop_world'),
+      segment(
+        MP.LEVELS.map(function (w) {
+          return { value: w.world, label: worldLabel(w.world) };
+        }),
+        coopWorld,
+        false,
+        function (v) {
+          coopWorld = v;
+          UI.rebuildLobby(lobbyState);
+        },
+        'mp-worlds',
+      ),
+    );
+    var world = MP.LEVELS.find(function (w) {
+      return w.world === coopWorld;
+    });
+    var grid = el('div.mp-level-grid');
+    world.levels.forEach(function (lv) {
+      var key = world.world + ':' + lv.label;
+      var kindTitle = lv.kind === 3 ? t('level_boss') : lv.kind === 4 ? t('level_quest') : lv.kind === 1 ? t('level_special') : '';
+      grid.appendChild(
+        el('button.mp-level.mp-level-k' + lv.kind + (key === s.coopLevel ? '.mp-on' : ''), {
+          text: lv.label,
+          title: worldLabel(world.world) + ' ' + lv.label + (kindTitle ? ' • ' + kindTitle : ''),
+          onclick: function () {
+            call('setting', 'coopLevel', key);
+          },
+        }),
+      );
+    });
+    opts.appendChild(grid);
+    opts.appendChild(el('div.mp-note', { text: t('coop_options_note') }));
+  }
+
   function renderRoom(win, state) {
     var s = state.settings;
     var edit = state.role === 'host';
 
-    // Left: room code + players.
+    // Left: room code, players, room/stream settings.
     var codeBox = el('div.mp-panel.mp-code-box', null, [
       el('div.mp-panel-title', { text: t('room_code') }),
       el('div.mp-code-value', { text: state.code || '-----' }),
@@ -318,23 +1127,92 @@
         } }),
       ]),
     ]);
-    var players = el('div.mp-players');
+    var players = el('div.mp-players' + (state.players.length > 2 ? '.mp-players-many' : ''));
     state.players.forEach(function (p) {
       if (!p) {
-        players.appendChild(el('div.mp-player.mp-empty', null, [el('span.mp-spinner', { style: { width: '22px', height: '22px' } }), el('span.mp-player-name', { text: t('empty_slot') })]));
+        players.appendChild(el('div.mp-player.mp-empty', null, [el('span.mp-spinner', { style: { width: '20px', height: '20px' } }), el('span.mp-player-name', { text: t('empty_slot') })]));
         return;
       }
       var tag = p.role === 'host' ? el('span.mp-player-tag.mp-host', { text: t('host') }) : el('span.mp-player-tag' + (p.ready ? '.mp-ok' : ''), { text: p.ready ? t('is_ready') : t('waiting') });
+      var canSwitch = edit || p.you;
+      var sideChip = p.side
+        ? el('button.mp-side-chip.mp-side-' + p.side, {
+            text: p.side === 'plants' ? '🌱' : '🧟',
+            title: t('side_' + p.side) + (canSwitch ? ' • ' + t('switch_side') : ''),
+            disabled: !canSwitch,
+            onclick: function () {
+              call('setSide', p.slot, p.side === 'plants' ? 'zombies' : 'plants');
+            },
+          })
+        : null;
       players.appendChild(
-        el('div.mp-player', null, [
-          el('span.mp-player-dot', { style: { background: p.role === 'host' ? 'var(--mp-p1)' : 'var(--mp-p2)' } }),
-          el('span.mp-player-name', { text: p.name, title: p.name }),
-          p.you ? el('span.mp-player-you', { text: t('you') }) : null,
+        el('div.mp-player' + (p.you ? '.mp-me' : ''), { title: p.you ? p.name + ' (' + t('you') + ')' : p.name }, [
+          el('span.mp-player-dot', { style: { background: MP.SLOT_COLORS[p.slot] } }),
+          el('span.mp-player-name', { text: p.name }),
+          p.account ? el('span.mp-verified', { text: '✓', title: t('account_verified') }) : null,
+          sideChip,
           tag,
+          edit && p.slot > 0
+            ? el('button.mp-kick', { text: '✕', title: t('kick'), onclick: function () {
+                call('kick', p.slot);
+              } })
+            : null,
         ]),
       );
     });
-    var side = el('div.mp-room-side', null, [codeBox, el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('players') }), players])]);
+    var side = el('div.mp-room-side', null, [
+      codeBox,
+      el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('players_count', { n: state.playerCount, max: s.maxPlayers }) }), players]),
+    ]);
+    var extra = el('div.mp-panel.mp-extra.mp-scroll', { 'data-scroll': 'extra' });
+    if (edit) {
+      extra.appendChild(el('div.mp-panel-title', { text: t('max_players') }));
+      extra.appendChild(
+        segment(
+          [2, 3, 4].map(function (n) {
+            return { value: n, label: String(n), disabled: n < state.playerCount };
+          }),
+          s.maxPlayers,
+          false,
+          function (v) {
+            call('setting', 'maxPlayers', v);
+          },
+        ),
+      );
+      extra.appendChild(el('div.mp-panel-title', { text: t('quality'), style: { marginTop: '10px' } }));
+      extra.appendChild(
+        segment(
+          ['low', 'medium', 'high'].map(function (q) {
+            return { value: q, label: t('quality_' + q) };
+          }),
+          s.quality,
+          false,
+          function (v) {
+            call('setting', 'quality', v);
+          },
+        ),
+      );
+      if (state.online) {
+        extra.appendChild(el('div.mp-panel-title', { text: t('room_visibility'), style: { marginTop: '10px' } }));
+        extra.appendChild(
+          segment(
+            [
+              { value: true, label: t('room_public') },
+              { value: false, label: t('room_private') },
+            ],
+            s.public !== false,
+            false,
+            function (v) {
+              call('setting', 'public', v);
+            },
+          ),
+        );
+      }
+    } else {
+      extra.appendChild(el('div.mp-note', { text: t('only_host_changes') }));
+    }
+    extra.appendChild(el('div.mp-note', { text: t('controls_hint'), style: { marginTop: '10px' } }));
+    side.appendChild(extra);
 
     // Right: modes + options.
     var modes = el('div.mp-modes');
@@ -363,85 +1241,59 @@
         call('setting', key, v);
       };
     }
-    var stageOptions = Object.keys(MP.STAGES).map(function (k) {
-      return { value: k, label: t(MP.STAGES[k].label), img: MP.STAGES[k].img };
-    });
-    if (s.mode === 'versus') {
-      opt(t('arena'), segment(stageOptions, s.stage, !edit, set('stage'), 'mp-stages'));
-      opt(
-        t('your_side'),
-        segment(
-          [
-            { value: 'plants', label: t('side_plants') },
-            { value: 'zombies', label: t('side_zombies') },
-          ],
-          state.role === 'host' ? s.hostSide : s.hostSide === 'plants' ? 'zombies' : 'plants',
-          !edit,
-          function (v) {
-            call('setting', 'hostSide', v);
-          },
-        ),
-      );
-      opt(
-        t('duration'),
-        segment(
-          MP.VERSUS_DURATIONS.map(function (n) {
-            return { value: n, label: t('minutes', { n: n }) };
-          }),
-          s.duration,
-          !edit,
-          set('duration'),
-        ),
-      );
-    } else if (s.mode === 'survival') {
-      opt(t('arena'), segment(stageOptions, s.stage, !edit, set('stage'), 'mp-stages'));
-      opt(
-        t('waves'),
-        segment(
-          MP.SURVIVAL_WAVES.map(function (n) {
-            return { value: n, label: t('waves_n', { n: n }) };
-          }),
-          s.waves,
-          !edit,
-          set('waves'),
-        ),
-      );
-      opt(
-        t('plant_deck'),
-        segment(
-          [
-            { value: 'kit', label: t('deck_kit') },
-            { value: 'collection', label: t('deck_collection') },
-          ],
-          s.deck,
-          !edit,
-          set('deck'),
-        ),
-      );
-    }
-    // Left column: stream quality (host) and the controls cheat sheet.
-    var extra = el('div.mp-panel.mp-extra');
-    if (state.role === 'host') {
-      extra.appendChild(el('div.mp-panel-title', { text: t('quality') }));
-      extra.appendChild(
-        segment(
-          ['low', 'medium', 'high'].map(function (q) {
-            return { value: q, label: t('quality_' + q) };
-          }),
-          s.quality,
-          false,
-          set('quality'),
-        ),
-      );
+    if (s.mode === 'coop') {
+      renderCoopLevel(opts, opt, state, s, edit);
     } else {
-      extra.appendChild(el('div.mp-note', { text: t('only_host_changes') }));
+      var stageOptions = Object.keys(MP.STAGES).map(function (k) {
+        return { value: k, label: t(MP.STAGES[k].label), img: MP.STAGES[k].img };
+      });
+      opt(t('arena'), segment(stageOptions, s.stage, !edit, set('stage'), 'mp-stages'));
+      if (s.mode === 'versus') {
+        opt(
+          t('your_side'),
+          segment(
+            [
+              { value: 'plants', label: t('side_plants') },
+              { value: 'zombies', label: t('side_zombies') },
+            ],
+            MP.sideOf(s, state.mySlot),
+            false,
+            function (v) {
+              call('setSide', state.mySlot, v);
+            },
+          ),
+        );
+        opts.appendChild(el('div.mp-note', { text: t('teams_note') }));
+      }
+      Object.keys(MP.OPTIONS).forEach(function (key) {
+        var def = MP.OPTIONS[key];
+        if (def.modes.indexOf(s.mode) < 0) return;
+        opt(
+          t(def.label),
+          segment(
+            def.values.map(function (v) {
+              return { value: v, label: optionLabel(def, v) };
+            }),
+            s[key],
+            !edit,
+            set(key),
+          ),
+        );
+      });
+      if (s.mode === 'versus') {
+        var deckTitle = el('div.mp-panel-title', { text: t('zombie_deck', { n: (s.zdeck || []).length, max: MP.DECK_SIZE }), style: { marginTop: '6px' } });
+        opts.appendChild(deckTitle);
+        opts.appendChild(el('div.mp-note', { text: state.canEditDeck ? t('zombie_deck_you') : t('zombie_deck_other') }));
+        opts.appendChild(renderDeck(state, s));
+        opts.appendChild(el('div.mp-note', { text: t('plants_pick_note') }));
+      } else {
+        opts.appendChild(el('div.mp-note', { text: t('survival_note') }));
+      }
     }
-    extra.appendChild(el('div.mp-note', { text: t('controls_hint'), style: { marginTop: '10px' } }));
-    side.appendChild(extra);
 
     var main = el('div.mp-room-main', null, [
       el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('mode') }), modes]),
-      el('div.mp-panel.mp-scroll', { style: { flex: '1' } }, [el('div.mp-panel-title', { text: t('options') }), opts]),
+      el('div.mp-panel.mp-scroll', { style: { flex: '1' }, 'data-scroll': 'options' }, [el('div.mp-panel-title', { text: t('options') }), opts]),
     ]);
     win.appendChild(el('div.mp-room', null, [side, main]));
 
@@ -517,13 +1369,169 @@
     badge.appendChild(head);
     info.players.forEach(function (p) {
       var ping = p.ping != null ? el('span.mp-ping' + (p.ping > 180 ? '.mp-bad' : ''), { text: t('ping', { ms: p.ping }) }) : null;
-      badge.appendChild(el('div.mp-badge-row', null, [el('span.mp-player-dot', { style: { background: p.color } }), el('span', { text: p.name }), ping]));
+      badge.appendChild(
+        el('div.mp-badge-row', null, [
+          el('span.mp-player-dot', { style: { background: p.color } }),
+          p.side ? el('span.mp-badge-side', { text: p.side === 'plants' ? '🌱' : '🧟', title: t('side_' + p.side) }) : null,
+          el('span', { text: p.name }),
+          p.info ? el('span.mp-badge-status', { text: p.info }) : null,
+          ping,
+        ]),
+      );
     });
     if (info.line) badge.appendChild(el('div.mp-badge-info', { text: info.line }));
     badge.appendChild(el('div.mp-note', { text: t('chat_hint') }));
-    if (info.action) {
-      badge.appendChild(el('button.mp-btn.mp-small.mp-red', { text: info.action.label, onclick: info.action.fn }));
+    (info.actions || []).forEach(function (a) {
+      badge.appendChild(el('button.mp-btn.mp-small.' + (a.cls || 'mp-red'), { text: a.label, onclick: a.fn }));
+    });
+  };
+
+  /* --------------------------------------------- survival: partner's lawn */
+
+  var pip = null;
+  UI.showPip = function (stream) {
+    if (!root) return;
+    if (!pip) {
+      var video = el('video', { autoplay: true, playsinline: true });
+      video.muted = true;
+      var name = el('span.mp-pip-name');
+      var info = el('span.mp-pip-info');
+      var dot = el('span.mp-player-dot', { style: { background: 'var(--mp-p2)' } });
+      var prev = el('button.mp-pip-btn.mp-pip-nav', { title: t('pip_prev'), text: '◀', onclick: function (e) {
+        e.stopPropagation();
+        call('watch', -1);
+      } });
+      var next = el('button.mp-pip-btn.mp-pip-nav', { title: t('pip_next'), text: '▶', onclick: function (e) {
+        e.stopPropagation();
+        call('watch', 1);
+      } });
+      var sound = el('button.mp-pip-btn', { title: t('pip_sound'), text: '🔇' });
+      var expand = el('button.mp-pip-btn', { title: t('pip_expand'), text: '⤢' });
+      var back = el('button.mp-btn.mp-small.mp-green.mp-pip-back', { text: t('pip_back') });
+      var wait = el('div.mp-pip-wait', null, [el('span.mp-spinner')]);
+      pip = el('div#pvzmp-pip.mp-interactive', null, [video, wait, el('div.mp-pip-bar', null, [prev, dot, name, info, next, sound, expand]), back]);
+      pip._video = video;
+      pip._name = name;
+      pip._info = info;
+      pip._dot = dot;
+      sound.onclick = function (e) {
+        e.stopPropagation();
+        video.muted = !video.muted;
+        sound.textContent = video.muted ? '🔇' : '🔊';
+        if (!video.muted) video.play().catch(function () {});
+      };
+      expand.onclick = function (e) {
+        e.stopPropagation();
+        UI.expandPip(!pip.classList.contains('mp-pip-expanded'));
+      };
+      back.onclick = function (e) {
+        e.stopPropagation();
+        UI.expandPip(false);
+      };
+      video.ondblclick = function () {
+        UI.expandPip(!pip.classList.contains('mp-pip-expanded'));
+      };
+      pip.addEventListener('mousedown', function (e) {
+        e.stopPropagation();
+      });
+      enablePipDrag(pip, pip.querySelector('.mp-pip-bar'));
+      root.insertBefore(pip, layers.chat);
     }
+    pip.classList.remove('mp-pip-waiting');
+    pip._video.srcObject = stream;
+    pip._video.play().catch(function () {});
+  };
+
+  // Switching lawns: keep the window, show a spinner until the new one plays.
+  UI.setPipWaiting = function () {
+    if (pip) pip.classList.add('mp-pip-waiting');
+  };
+
+  // The window can be dragged by its title bar; the position is remembered.
+  function enablePipDrag(box, handle) {
+    var saved = MP.store.get('pipPos', null);
+    if (saved) {
+      box.style.left = saved.x + 'px';
+      box.style.top = saved.y + 'px';
+      box.style.bottom = 'auto';
+    }
+    var drag = null;
+    handle.addEventListener('pointerdown', function (e) {
+      if (box.classList.contains('mp-pip-expanded') || e.target.tagName === 'BUTTON') return;
+      var r = box.getBoundingClientRect();
+      drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+      handle.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    handle.addEventListener('pointermove', function (e) {
+      if (!drag) return;
+      var x = MP.util.clamp(e.clientX - drag.dx, 0, window.innerWidth - box.offsetWidth);
+      var y = MP.util.clamp(e.clientY - drag.dy, 0, window.innerHeight - box.offsetHeight);
+      box.style.left = x + 'px';
+      box.style.top = y + 'px';
+      box.style.bottom = 'auto';
+    });
+    handle.addEventListener('pointerup', function () {
+      if (!drag) return;
+      drag = null;
+      MP.store.set('pipPos', { x: parseFloat(box.style.left) || 0, y: parseFloat(box.style.top) || 0 });
+    });
+  }
+
+  UI.setPipLabel = function (name, info, color, nav) {
+    if (!pip) return;
+    pip._name.textContent = name || '';
+    pip._info.textContent = info ? ' • ' + info : '';
+    if (color) pip._dot.style.background = color;
+    pip.classList.toggle('mp-pip-has-nav', !!nav);
+  };
+
+  UI.expandPip = function (on) {
+    if (pip) pip.classList.toggle('mp-pip-expanded', !!on);
+  };
+
+  UI.hidePipExpanded = function () {
+    UI.expandPip(false);
+  };
+
+  UI.hidePip = function () {
+    if (!pip) return;
+    try {
+      pip._video.srcObject = null;
+    } catch (e) {}
+    pip.remove();
+    pip = null;
+  };
+
+  /* ------------------------------------------------- cloud save conflict */
+
+  var dialog = null;
+  UI.showCloudConflict = function (c) {
+    if (!root) return;
+    UI.closeCloudConflict();
+    var when = c && c.cloud && c.cloud.updatedAt ? new Date(c.cloud.updatedAt).toLocaleString() : '';
+    var win = el('div.mp-window.mp-dialog.mp-interactive', null, [
+      el('div.mp-window-title', { text: t('cloud_title') }),
+      el('div.mp-panel', null, [el('div.mp-dialog-text', { text: t('cloud_conflict', { when: when }) })]),
+      el('div.mp-results-actions', null, [
+        el('button.mp-btn.mp-brown', { text: t('cloud_keep_local'), onclick: function () {
+          call('cloudKeepLocal');
+        } }),
+        el('button.mp-btn.mp-green', { text: t('cloud_keep_cloud'), onclick: function () {
+          call('cloudKeepCloud');
+        } }),
+      ]),
+    ]);
+    dialog = el('div.mp-backdrop.mp-dialog-layer', null, win);
+    dialog.addEventListener('mousedown', function (e) {
+      e.stopPropagation();
+    });
+    root.appendChild(dialog);
+  };
+
+  UI.closeCloudConflict = function () {
+    if (dialog) dialog.remove();
+    dialog = null;
   };
 
   /* ----------------------------------------------------------- versus HUD */
@@ -559,6 +1567,7 @@
     b.style.transform = 'scale(' + scale + ')';
     b.style.transformOrigin = 'right bottom';
     b.lastChild.textContent = String(Math.floor(data.brains));
+    b.title = data.income ? '+' + data.income.toFixed(1) + '/s' : '';
     var tm = hudNodes.timer;
     tm.style.left = '50%';
     tm.style.top = (data.timerTop != null ? data.timerTop * frame.height : 90 * scale) + 'px';
@@ -613,45 +1622,54 @@
       (scene.lanes || []).forEach(function (ln, i) {
         if (!grid || ln.l < 0) return;
         var n = stageNode('lane' + i, 'mp-lane');
+        n.style.setProperty('--mp-c', ln.color || '');
+        n.classList.toggle('mp-colored', !!ln.color && !ln.local);
         place(n, f, { x: grid.x, y: grid.y + grid.ch * ln.l, w: grid.cw * grid.cols + grid.cw * 0.6, h: grid.ch });
       });
       (scene.cells || []).forEach(function (c, i) {
         if (!grid || !c) return;
         var n = stageNode('cell' + i, 'mp-cell');
-        n.className = 'mp-cell' + (c.local ? ' mp-local' : '') + (c.kind === 'shovel' ? ' mp-shovel' : '');
+        n.className = 'mp-cell' + (c.local ? ' mp-local' : '') + (c.kind === 'shovel' ? ' mp-shovel' : '') + (c.color && !c.local ? ' mp-colored' : '');
+        n.style.setProperty('--mp-c', c.color || '');
         place(n, f, { x: grid.x + grid.cw * c.c + 2 / f.width, y: grid.y + grid.ch * c.l + 2 / f.height, w: grid.cw - 4 / f.width, h: grid.ch - 4 / f.height });
       });
-      if (scene.sel) {
-        var r = scene.sel.kind === 'card' ? lay.cards && lay.cards[scene.sel.i] : scene.sel.kind === 'zcard' ? lay.zcards && lay.zcards[scene.sel.i] : scene.sel.kind === 'shovel' ? lay.shovel : scene.sel.kind === 'food' ? lay.food : null;
-        if (r) {
-          var sn = stageNode('sel', 'mp-sel', function () {
-            return el('div.mp-sel', null, [el('div.mp-sel-tag')]);
-          });
-          sn.firstChild.textContent = scene.sel.tag || t('p2_label');
-          place(sn, f, r);
-        }
-      }
+      // Packets picked by several players stack their name tags.
+      var stack = {};
+      (scene.sels || []).forEach(function (sel, i) {
+        var r = sel.kind === 'card' ? lay.cards && lay.cards[sel.i] : sel.kind === 'zcard' ? lay.zcards && lay.zcards[sel.i] : sel.kind === 'shovel' ? lay.shovel : sel.kind === 'food' ? lay.food : null;
+        if (!r) return;
+        var k = sel.kind + ':' + sel.i;
+        var depth = (stack[k] = (stack[k] || 0) + 1) - 1;
+        var sn = stageNode('sel' + i, 'mp-sel', function () {
+          return el('div.mp-sel', null, [el('div.mp-sel-tag')]);
+        });
+        sn.style.setProperty('--mp-c', sel.color || 'var(--mp-p2)');
+        sn.firstChild.textContent = sel.tag || t('p2_label');
+        sn.firstChild.style.top = -16 - depth * 20 + 'px';
+        place(sn, f, r);
+      });
       (scene.cd || []).forEach(function (frac, i) {
         var zr = lay.zcards && lay.zcards[i];
         if (!zr || !(frac > 0)) return;
         var n = stageNode('cd' + i, 'mp-cd');
         place(n, f, { x: zr.x, y: zr.y, w: zr.w, h: zr.h * frac });
       });
-      if (scene.cursor) {
-        var cur = stageNode('cursor', 'mp-cursor', function () {
+      (scene.cursors || []).forEach(function (cu) {
+        var cur = stageNode('cursor' + cu.slot, 'mp-cursor', function () {
           var c = el('div.mp-cursor');
           c.innerHTML = ICONS.cursor;
           c.appendChild(el('div.mp-cursor-held'));
           c.appendChild(el('div.mp-cursor-name'));
           return c;
         });
-        cur.style.left = scene.cursor.x * f.width + 'px';
-        cur.style.top = scene.cursor.y * f.height + 'px';
-        cur.lastChild.textContent = scene.cursor.name || '';
+        cur.style.setProperty('--mp-c', cu.color || 'var(--mp-p2)');
+        cur.style.left = cu.x * f.width + 'px';
+        cur.style.top = cu.y * f.height + 'px';
+        cur.lastChild.textContent = cu.name || '';
         var held = cur.children[1];
-        held.style.display = scene.cursor.held ? 'flex' : 'none';
-        held.textContent = scene.cursor.held || '';
-      }
+        held.style.display = cu.held ? 'flex' : 'none';
+        held.textContent = cu.held || '';
+      });
       if (scene.ghost && scene.ghost.src) {
         var g = stageNode('ghost', 'mp-ghost', function () {
           return el('img.mp-ghost', { alt: '' });
@@ -705,6 +1723,8 @@
     });
     view.addEventListener('wheel', function (e) {
       e.preventDefault();
+      var p = norm(e);
+      if (p) call('viewPointer', 'wheel', p.x, p.y, 0, e.deltaY);
     }, { passive: false });
     return view;
   };
@@ -741,6 +1761,10 @@
     view = null;
   };
 
+  UI.viewVisible = function () {
+    return !!view;
+  };
+
   UI.viewVideo = function () {
     return view && view._video;
   };
@@ -759,6 +1783,34 @@
     return { left: box.left + (box.width - w) / 2, top: box.top + (box.height - h) / 2, width: w, height: h };
   };
 
+  /* --------------------------------------------------------- loading bar */
+
+  var loadingBar = null;
+  // info: {frame:{left,top,width,height}, pct, text} or null to hide.
+  UI.renderLoading = function (info) {
+    if (!root) return;
+    if (!info || !info.frame) {
+      if (loadingBar) loadingBar.remove();
+      loadingBar = null;
+      return;
+    }
+    if (!loadingBar) {
+      loadingBar = el('div.mp-loading', null, [
+        el('div.mp-loading-text'),
+        el('div.mp-loading-track', null, [el('div.mp-loading-fill'), el('div.mp-loading-sprout')]),
+      ]);
+      root.insertBefore(loadingBar, layers.toasts);
+    }
+    var f = info.frame;
+    loadingBar.style.left = f.left + f.width / 2 + 'px';
+    loadingBar.style.top = f.top + f.height * 0.82 + 'px';
+    loadingBar.style.width = Math.min(560, f.width * 0.6) + 'px';
+    loadingBar.firstChild.textContent = info.text || t('loading');
+    var pct = Math.max(0, Math.min(100, info.pct || 0));
+    loadingBar.querySelector('.mp-loading-fill').style.width = pct + '%';
+    loadingBar.querySelector('.mp-loading-sprout').style.left = pct + '%';
+  };
+
   /* -------------------------------------------------------------- results */
 
   UI.showResults = function (r) {
@@ -767,9 +1819,11 @@
     if (r.sub) win.appendChild(el('div.mp-result-sub', { text: r.sub }));
     if (r.stats && r.stats.length) {
       var grid = el('div.mp-panel.mp-stats');
+      grid.style.gridTemplateColumns = '1fr' + ' auto'.repeat((r.headers || []).length);
       grid.appendChild(el('div.mp-h', { text: '' }));
-      (r.headers || []).forEach(function (h) {
-        grid.appendChild(el('div.mp-h', { text: h, style: { textAlign: 'right' } }));
+      (r.headers || []).forEach(function (h, i) {
+        var slot = r.slots ? r.slots[i] : i;
+        grid.appendChild(el('div.mp-h', { style: { textAlign: 'right' } }, [el('span.mp-player-dot', { style: { background: MP.SLOT_COLORS[slot] } }), ' ' + h]));
       });
       r.stats.forEach(function (row) {
         grid.appendChild(el('div', { text: row[0], style: { textShadow: 'var(--mp-outline)' } }));

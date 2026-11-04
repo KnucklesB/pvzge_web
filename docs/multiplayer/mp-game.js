@@ -33,6 +33,7 @@
     'SoundRescourses',
     'CharacterManager',
     'MultiLanguage',
+    'PlayerProperties',
   ];
 
   var G = (MP.game = new MP.Emitter());
@@ -51,10 +52,11 @@
   G.init = function () {
     if (G._initPromise) return G._initPromise;
     G._initPromise = (async function () {
-      while (!window.System || typeof System.import !== 'function') await sleep(200);
-      G.cc = await System.import('cc');
+      // Wait for the game's own modules: by then the engine ("cc", whose
+      // URL comes from the import map the page sets up at boot) is loaded.
       var probe = 'chunks:///_virtual/KeyListener.ts';
-      while (!(System.has && System.has(probe))) await sleep(250);
+      while (!window.System || typeof System.import !== 'function' || !(System.has && System.has(probe))) await sleep(250);
+      G.cc = await System.import('cc');
       for (var i = 0; i < MODULES.length; i++) {
         var name = MODULES[i];
         try {
@@ -391,11 +393,18 @@
     return after === -1;
   };
 
-  // Pointer of the remote player in world space, used to collect sun etc.
-  G.remotePointer = { active: false, world: null, line: null };
+  // Pointers of the remote players (by slot) in world space, used to
+  // collect sun etc. by hovering, like the local mouse does.
+  G.remotePointers = {};
 
-  G.setRemotePointer = function (ui) {
-    var rp = G.remotePointer;
+  // setRemotePointer(slot, ui) - ui null hides it; setRemotePointer(null)
+  // clears every remote pointer.
+  G.setRemotePointer = function (slot, ui) {
+    if (slot == null) {
+      G.remotePointers = {};
+      return;
+    }
+    var rp = G.remotePointers[slot] || (G.remotePointers[slot] = { active: false, world: null, line: null });
     if (!ui || !G.inLevel()) {
       rp.active = false;
       rp.world = null;
@@ -427,10 +436,137 @@
     managedZombieBar: false,
     // When set, the 1.5x speed toggle is disabled (Versus is timed).
     lockSpeed: false,
+    // When set, the host's real mouse can't touch the canvas (the guest is
+    // using the native seed chooser through injected events).
+    remoteChooser: false,
   };
+
+  /* ------------------------------------------------------ keep running */
+  // Browsers stop requestAnimationFrame in background tabs and Cocos pauses
+  // itself when the page is hidden. During online play the host (and every
+  // player in Survival) must keep simulating and streaming, so while
+  // keep-alive is on the engine's auto-pause is disabled and a worker timer
+  // (not throttled like page timers) drives frames whenever rAF has stalled.
+
+  var keep = { on: false, worker: null, lastRaf: performance.now() };
+  (function watchRaf() {
+    keep.lastRaf = performance.now();
+    requestAnimationFrame(watchRaf);
+  })();
+
+  function onKeepTick() {
+    var game = G.cc && G.cc.game;
+    // Only for real background tabs: a visible page always has rAF, and
+    // extra frames on a slow machine would just starve the main thread.
+    if (!keep.on || !game || game.isPaused() || !document.hidden) return;
+    if (performance.now() - keep.lastRaf < 250) return; // rAF is alive
+    try {
+      game._updateCallback();
+    } catch (e) {
+      MP.warn('background frame failed', e);
+    }
+  }
+
+  G.setKeepAlive = function (on) {
+    on = !!on;
+    var game = G.cc && G.cc.game;
+    if (!game || on === keep.on) return;
+    keep.on = on;
+    if (on) {
+      game.pauseByEngine = function () {};
+      if (game._pausedByEngine) game.resumeByEngine();
+      if (!keep.worker && window.Worker && window.Blob) {
+        try {
+          var url = URL.createObjectURL(new Blob(['setInterval(function(){postMessage(0)},33);'], { type: 'text/javascript' }));
+          keep.worker = new Worker(url);
+          keep.worker.onmessage = onKeepTick;
+        } catch (e) {
+          MP.warn('background worker unavailable', e);
+        }
+      }
+    } else {
+      delete game.pauseByEngine; // back to the prototype's behaviour
+      if (keep.worker) {
+        keep.worker.terminate();
+        keep.worker = null;
+      }
+      if (document.hidden) game.pauseByEngine();
+    }
+  };
+
+  G.keepAliveOn = function () {
+    return keep.on;
+  };
+
+  /* ----------------------------------------------------------- loading */
+  // Scene/level transitions go through KeyListener's static helpers; count
+  // them and the files fetched meanwhile to drive a loading bar.
+
+  var load = { depth: 0, files: 0, since: 0 };
+  G.loadingState = function () {
+    if (!load.depth) return null;
+    // No total is known up front: approach 95% as files keep arriving.
+    var pct = Math.min(95, Math.round(100 * (1 - Math.exp(-load.files / 120))));
+    return { pct: Math.max(3, pct), files: load.files, ms: Math.round(performance.now() - load.since) };
+  };
+
+  function wrapLoading(KL, name) {
+    var orig = KL[name];
+    if (typeof orig !== 'function' || orig._mpWrapped) return;
+    var wrapped = function () {
+      if (!load.depth++) {
+        load.files = 0;
+        load.since = performance.now();
+        G.emit('loading', true);
+      }
+      var done = function () {
+        if (load.depth > 0 && !--load.depth) G.emit('loading', false);
+      };
+      var r;
+      try {
+        r = orig.apply(this, arguments);
+      } catch (e) {
+        done();
+        throw e;
+      }
+      if (r && typeof r.then === 'function') r.then(done, done);
+      else done();
+      return r;
+    };
+    wrapped._mpWrapped = true;
+    KL[name] = wrapped;
+  }
+
+  function installLoadingHooks() {
+    var KL = G.KL();
+    if (!KL) return;
+    ['goToLevel', 'GoToGame', 'GoToScene'].forEach(function (n) {
+      wrapLoading(KL, n);
+    });
+    if (window.PerformanceObserver) {
+      try {
+        new PerformanceObserver(function (list) {
+          if (load.depth) load.files += list.getEntries().length;
+        }).observe({ type: 'resource', buffered: false });
+      } catch (e) {}
+    }
+  }
 
   function installHooks() {
     var cc = G.cc;
+    installLoadingHooks();
+
+    // 0. Let the guest drive the native seed chooser: their clicks are replayed
+    //    as synthetic DOM events, and the host's real mouse is held back.
+    ['mousedown', 'mouseup', 'mousemove', 'wheel'].forEach(function (type) {
+      window.addEventListener(
+        type,
+        function (e) {
+          if (G.hooks.remoteChooser && e.isTrusted && e.target === G.canvas) e.stopImmediatePropagation();
+        },
+        true,
+      );
+    });
 
     // 1. Sun / coins / drops are collected by hovering them, as in the game.
     var Dropping = G.m.dropping.dropping;
@@ -439,15 +575,23 @@
       var origUpdate = Dropping.prototype.characterUpdate;
       Dropping.prototype.characterUpdate = function (dt) {
         origUpdate.call(this, dt);
-        var rp = G.remotePointer;
-        if (!rp.active || !rp.world) return;
+        var rps = G.remotePointers;
+        var slots = Object.keys(rps);
+        if (!slots.length) return;
         try {
           if (!this.node || !this.node.isValid) return;
           if (!this.mouseListen || !this.collectable() || !this.collectable_after()) return;
           var ut = this.node.getComponent(cc.UITransform);
           var size = ut.width * this.originalScale * this.dpScale;
           var rec = Rect.createRectangleNodeCenter(this.node, size, size);
-          if (rec.judgeInRecP(rp.world) || (rp.line && rec.judgeCrossLine(rp.line))) this.collect();
+          for (var i = 0; i < slots.length; i++) {
+            var rp = rps[slots[i]];
+            if (!rp.active || !rp.world) continue;
+            if (rec.judgeInRecP(rp.world) || (rp.line && rec.judgeCrossLine(rp.line))) {
+              this.collect();
+              return;
+            }
+          }
         } catch (e) {
           /* never break the game loop */
         }
@@ -501,6 +645,42 @@
     }
   }
 
+  /* ------------------------------------------------------- seed chooser */
+
+  G.seedChooserOpen = function () {
+    var lp = G.lp();
+    try {
+      return !!(lp && lp.isSeedChooserMode && lp.isSeedChooserMode());
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // Replays a pointer action at a normalized canvas position as real DOM
+  // events, exactly where the engine listens for them.
+  G.injectPointer = function (type, nx, ny, button, deltaY) {
+    var c = G.canvas;
+    if (!c) return;
+    var r = c.getBoundingClientRect();
+    var init = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX: r.left + nx * r.width,
+      clientY: r.top + ny * r.height,
+      button: button || 0,
+      buttons: type === 'down' ? 1 : 0,
+    };
+    if (type === 'wheel') {
+      init.deltaY = deltaY || 0;
+      c.dispatchEvent(new WheelEvent('wheel', init));
+      return;
+    }
+    var name = type === 'down' ? 'mousedown' : type === 'up' ? 'mouseup' : 'mousemove';
+    if (type !== 'move') c.dispatchEvent(new MouseEvent('mousemove', init));
+    c.dispatchEvent(new MouseEvent(name, init));
+  };
+
   /* ---------------------------------------------------------- zombie side */
 
   G.spawnZombie = function (lane, type) {
@@ -552,6 +732,7 @@
             card.ca.cooling = false;
           });
           sb.index = -1;
+          if (MP.cards) MP.cards.learnFrom(sb.zombieCards[0]);
           resolve(sb);
         } else if (++tries < 100) setTimeout(wait, 50);
         else resolve(null);
@@ -580,6 +761,21 @@
 
   G.goToWorldMap = function () {
     return G.KL().GoToWorldmap();
+  };
+
+  // A campaign level by id (random pick when several, like the map does).
+  G.goToLevel = function (ids) {
+    return G.KL().goToLevel(ids, [], true, false);
+  };
+
+  // False while the profile is still forced through the tutorial (the
+  // main menu's Play goes to "forceLevel" instead of the map).
+  G.mapUnlocked = function () {
+    try {
+      return !G.m.PlayerProperties.AllPlayerProperties.currentPlayer.forceLevel;
+    } catch (e) {
+      return true;
+    }
   };
 
   G.startCustomLevel = function (objects) {
@@ -612,8 +808,9 @@
     }
   };
 
-  // The game itself ships English and Chinese.
+  // The game ships English and Chinese; mp-i18n.js adds Portuguese.
   G.gameLanguage = function () {
+    if (MP.ptBR && MP.ptBR.showing()) return 'pt';
     var ML = G.m.MultiLanguage && G.m.MultiLanguage.MultiLanguage;
     return ML && ML.currentLanguage === 1 ? 'zh' : 'en';
   };

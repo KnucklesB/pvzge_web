@@ -1,15 +1,10 @@
 /*
- * Multiplayer configuration used by docker-compose: the signaling server is
- * reached through the same origin as the game (nginx proxies /peerjs).
+ * Multiplayer configuration used by docker-compose: the multiplayer server
+ * (signaling + accounts API) is reached on the same origin as the game.
  */
 window.PVZ_MP_CONFIG = Object.assign(
   {
-    peer: {
-      host: location.hostname,
-      port: location.port ? Number(location.port) : location.protocol === 'https:' ? 443 : 80,
-      path: '/',
-      secure: location.protocol === 'https:',
-    },
+    server: location.origin,
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
