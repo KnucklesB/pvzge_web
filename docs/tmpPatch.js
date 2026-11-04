@@ -88,6 +88,18 @@ window.electronAPI = {
   window: () => electron.exitFullscreen(),
   openUrl: url => electron.shell.openExternal(url),
   getCurrentResolutionSync: () => '',
+  captureScreenshot: async () => {
+    const { captureGameScreenshot } = await import('./game-screenshot.js');
+    return captureGameScreenshot(async (blob, filename) => {
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return filename;
+    });
+  },
   onWindowFocused: callback => listenWindow('focus', callback),
   onWindowUnfocused: callback => listenWindow('blur', callback),
   saveLevel: (path, content) => levelRequest('readwrite', store => store.put(content, path)),
