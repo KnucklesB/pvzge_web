@@ -12,6 +12,10 @@
  *                    are picked up (default 30, 0 = never)
  *   DB_MIGRATE       "false" to skip importing DATA_DIR/db.json on first start
  *
+ * Legacy import at any time (merges, safe to repeat):
+ *   node cli.js import-legacy <dir with db.json and saves/> [--overwrite]
+ *   node cli.js import-save <user> <save.json>
+ *
  * Tables (created automatically, utf8mb4):
  *   meta           server secret and schema version
  *   users          accounts (password = scrypt hash), stats, save metadata
@@ -260,6 +264,21 @@ class MariaStore extends BaseStore {
 
   // Picks up saves changed directly in the database (other tools, restores).
   async syncSaveMeta() {
+    // Accounts added or changed outside this process (cli.js import-legacy,
+    // password resets, other tools).
+    for (const r of await this.pool.query('SELECT * FROM users')) {
+      const known = this.db.users[r.id];
+      if (!known) {
+        const u = this.rowToUser(r);
+        if (!u.stats) u.stats = { matches: 0, wins: 0, versus: 0, versusWins: 0, coop: 0, survival: 0, bestWave: 0 };
+        this.db.users[u.id] = u;
+        this.byName.set(u.username.toLowerCase(), u);
+      } else if (known.password !== r.password) {
+        // New password set elsewhere: its sessions were ended there too.
+        known.password = r.password;
+        for (const [k, ss] of Object.entries(this.db.sessions)) if (ss.userId === r.id) delete this.db.sessions[k];
+      }
+    }
     const rows = await this.pool.query('SELECT user_id, updated_at, size, device FROM saves');
     for (const r of rows) {
       const u = this.db.users[r.user_id];
@@ -427,62 +446,106 @@ class MariaStore extends BaseStore {
     return rows.map((r) => ({ index: r.idx, name: r.name, coin: Number(r.coin), gem: Number(r.gem), worldkey: r.worldkey, ticket: r.ticket, sprout: r.sprout }));
   }
 
-  /* migration from the file store (DATA_DIR/db.json + saves/*.json) */
+  /* legacy import: the file store (db.json + saves/*.json) into MariaDB */
 
-  async migrateFromFiles() {
-    const file = path.join(this.dir || '', 'db.json');
-    if (!this.dir || !fs.existsSync(file)) return;
+  // Merges a legacy data directory into the database. Accounts that already
+  // exist (same id or username) are kept; their legacy save is imported when
+  // the database has none for them or the legacy one is newer (overwrite:
+  // always), and the replaced save goes to save_history. Safe to run again.
+  // Returns counts.
+  async importLegacy(dir, opts) {
+    opts = opts || {};
+    const file = path.join(dir || '', 'db.json');
+    if (!dir || !fs.existsSync(file)) throw new Error('No db.json in ' + dir);
     let db;
     try {
       db = JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch (e) {
-      console.error('[db] cannot read %s for the migration: %s', file, e.message);
-      return;
+      throw new Error('Cannot read ' + file + ': ' + e.message);
     }
+    const out = { users: 0, usersKept: 0, saves: 0, savesKept: 0, history: 0, sessions: 0, matches: 0, scores: 0, achievements: 0 };
     const users = Object.values(db.users || {});
-    console.log('[db] importing %d account(s) from %s', users.length, file);
+    const idMap = {}; // legacy id -> database id
     const conn = await this.pool.getConnection();
     try {
       await conn.beginTransaction();
-      if (db.secret) await conn.query('REPLACE INTO meta (k, v) VALUES (?, ?)', ['secret', db.secret]);
+      // A fresh database takes over the legacy secret (sessions/tickets stay valid).
+      if (db.secret && opts.secret) await conn.query('REPLACE INTO meta (k, v) VALUES (?, ?)', ['secret', db.secret]);
       for (const u of users) {
-        const s = u.save || {};
-        await conn.query(
-          'INSERT IGNORE INTO users (id, username, password, created_at, stats, save_updated_at, save_size, save_device) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-          [u.id, u.username, u.password, u.createdAt || Date.now(), JSON.stringify(u.stats || {}), s.updatedAt == null ? null : s.updatedAt, s.size == null ? null : s.size, s.device || null],
-        );
-        const saveFile = path.join(this.dir, 'saves', String(u.id).replace(/[^a-f0-9-]/gi, '') + '.json');
+        if (!u || !u.id || !u.username) continue;
+        const found = await conn.query('SELECT id FROM users WHERE id = ? OR username = ? LIMIT 1', [u.id, u.username]);
+        if (found.length) {
+          idMap[u.id] = found[0].id;
+          out.usersKept++;
+        } else {
+          await conn.query('INSERT INTO users (id, username, password, created_at, stats) VALUES (?, ?, ?, ?, ?)', [
+            u.id,
+            u.username,
+            u.password,
+            u.createdAt || Date.now(),
+            JSON.stringify(u.stats || {}),
+          ]);
+          idMap[u.id] = u.id;
+          out.users++;
+        }
+        const target = idMap[u.id];
+        const saveFile = path.join(dir, 'saves', String(u.id).replace(/[^a-f0-9-]/gi, '') + '.json');
         let data = null;
         try {
           data = JSON.parse(fs.readFileSync(saveFile, 'utf8')).data;
         } catch (e) {}
         if (typeof data === 'string') {
-          const at = s.updatedAt || Date.now();
-          await conn.query('INSERT IGNORE INTO saves (user_id, data, updated_at, size, device) VALUES (?, ?, ?, ?, ?)', [u.id, data, at, Buffer.byteLength(data), s.device || '']);
-          await conn.query('UPDATE users SET save_updated_at = ?, save_size = ? WHERE id = ?', [at, Buffer.byteLength(data), u.id]);
-          await this.writeProfiles(conn, u.id, data, at);
+          const at = (u.save && u.save.updatedAt) || fs.statSync(saveFile).mtimeMs | 0;
+          const cur = await conn.query('SELECT updated_at FROM saves WHERE user_id = ?', [target]);
+          if (!cur.length || opts.overwrite || at > Number(cur[0].updated_at)) {
+            if (cur.length) {
+              await conn.query(
+                "INSERT INTO save_history (user_id, data, updated_at, size, device, reason, archived_at) SELECT user_id, data, updated_at, size, device, 'import', ? FROM saves WHERE user_id = ?",
+                [Date.now(), target],
+              );
+            }
+            const size = Buffer.byteLength(data);
+            const device = (u.save && u.save.device) || 'legacy';
+            await conn.query(
+              `INSERT INTO saves (user_id, data, updated_at, size, device) VALUES (?, ?, ?, ?, ?)
+               ON DUPLICATE KEY UPDATE data = VALUES(data), updated_at = VALUES(updated_at), size = VALUES(size), device = VALUES(device)`,
+              [target, data, at, size, device],
+            );
+            await conn.query('UPDATE users SET save_updated_at = ?, save_size = ?, save_device = ? WHERE id = ?', [at, size, device, target]);
+            await this.writeProfiles(conn, target, data, at);
+            out.saves++;
+          } else out.savesKept++;
         }
         let bak = null;
         try {
           bak = JSON.parse(fs.readFileSync(saveFile.replace(/\.json$/, '.bak.json'), 'utf8')).data;
         } catch (e) {}
         if (typeof bak === 'string') {
-          await conn.query('INSERT INTO save_history (user_id, data, updated_at, size, device, reason, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [
-            u.id,
-            bak,
-            0,
-            Buffer.byteLength(bak),
-            'backup',
-            'migrated',
-            Date.now(),
-          ]);
+          const size = Buffer.byteLength(bak);
+          const dup = await conn.query("SELECT id FROM save_history WHERE user_id = ? AND reason = 'migrated' AND size = ? LIMIT 1", [target, size]);
+          if (!dup.length) {
+            await conn.query('INSERT INTO save_history (user_id, data, updated_at, size, device, reason, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [
+              target,
+              bak,
+              0,
+              size,
+              'backup',
+              'migrated',
+              Date.now(),
+            ]);
+            out.history++;
+          }
         }
       }
-      for (const [h, s] of Object.entries(db.sessions || {})) {
-        if (s.expires > Date.now()) await conn.query('INSERT IGNORE INTO sessions (token_hash, user_id, expires) VALUES (?, ?, ?)', [h, s.userId, s.expires]);
+      for (const [h, ss] of Object.entries(db.sessions || {})) {
+        if (ss.expires > Date.now() && idMap[ss.userId] === ss.userId) {
+          const r = await conn.query('INSERT IGNORE INTO sessions (token_hash, user_id, expires) VALUES (?, ?, ?)', [h, ss.userId, ss.expires]);
+          out.sessions += r.affectedRows || 0;
+        }
       }
       for (const m of db.matches || []) {
-        await conn.query('INSERT IGNORE INTO matches (id, at, mode, stage, winner, duration, waves, players) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [
+        const players = (m.players || []).map((pl) => Object.assign({}, pl, { userId: pl.userId ? idMap[pl.userId] || pl.userId : pl.userId }));
+        const r = await conn.query('INSERT IGNORE INTO matches (id, at, mode, stage, winner, duration, waves, players) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [
           m.id,
           m.at,
           m.mode || '',
@@ -490,28 +553,52 @@ class MariaStore extends BaseStore {
           m.winner || '',
           m.duration || 0,
           m.waves || 0,
-          JSON.stringify(m.players || []),
+          JSON.stringify(players),
         ]);
+        out.matches += r.affectedRows || 0;
       }
       for (const [board, list] of Object.entries(db.scores || {})) {
         for (const e of list) {
-          await conn.query('INSERT IGNORE INTO scores (board, user_id, score, details, at) VALUES (?, ?, ?, ?, ?)', [board, e.userId, e.score, e.details == null ? null : JSON.stringify(e.details), e.at]);
+          const uid = idMap[e.userId];
+          if (!uid) continue;
+          // Keep the best of both.
+          const r = await conn.query(
+            `INSERT INTO scores (board, user_id, score, details, at) VALUES (?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE details = IF(VALUES(score) > score, VALUES(details), details), at = IF(VALUES(score) > score, VALUES(at), at), score = GREATEST(score, VALUES(score))`,
+            [board, uid, e.score, e.details == null ? null : JSON.stringify(e.details), e.at],
+          );
+          if (r.affectedRows) out.scores++;
         }
       }
       for (const [userId, map] of Object.entries(db.achievements || {})) {
-        for (const [id, at] of Object.entries(map)) await conn.query('INSERT IGNORE INTO achievements (user_id, achievement, unlocked_at) VALUES (?, ?, ?)', [userId, id, at]);
+        const uid = idMap[userId];
+        if (!uid) continue;
+        for (const [id, at] of Object.entries(map)) {
+          const r = await conn.query('INSERT IGNORE INTO achievements (user_id, achievement, unlocked_at) VALUES (?, ?, ?)', [uid, id, at]);
+          out.achievements += r.affectedRows || 0;
+        }
       }
       await conn.commit();
     } catch (e) {
       await conn.rollback().catch(() => {});
-      throw new Error('Migration from ' + file + ' failed: ' + e.message);
+      throw new Error('Import from ' + file + ' failed: ' + e.message);
     } finally {
       conn.release();
     }
+    return out;
+  }
+
+  // First start on an empty database: import DATA_DIR automatically.
+  async migrateFromFiles() {
+    const file = path.join(this.dir || '', 'db.json');
+    if (!this.dir || !fs.existsSync(file)) return;
+    console.log('[db] importing the accounts of %s', file);
+    const r = await this.importLegacy(this.dir, { secret: true });
+    console.log('[db] imported %d account(s), %d save(s), %d old backup(s), %d match(es)', r.users, r.saves, r.history, r.matches);
     try {
       fs.renameSync(file, file + '.migrated');
     } catch (e) {}
-    console.log('[db] migration done (%s renamed to db.json.migrated; the save files are kept)', file);
+    console.log('[db] %s renamed to db.json.migrated; the save files are kept', file);
   }
 
   async close() {

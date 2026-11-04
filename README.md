@@ -73,13 +73,17 @@ Without configuration the game uses the public PeerJS cloud for signaling, so pl
 
 #### MariaDB
 
-The bundled `docker-compose.yml` stores everything in **MariaDB** (service `mariadb`, volume `mariadb-data`): set `DB_PASSWORD` and `DB_ROOT_PASSWORD` in a `.env` file next to it (or in the Portainer stack's environment variables). `docker compose --profile tools up -d` also starts Adminer on http://localhost:8081 to browse the database.
+Point the server at your MariaDB (or MySQL) server with `DB_HOST`, `DB_PORT` (3306), `DB_USER`, `DB_PASSWORD` and `DB_NAME` (pvzge), or `DATABASE_URL=mariadb://user:password@host:3306/pvzge`. With Docker Compose / Portainer put them in the stack's environment variables or a `.env` file; a MariaDB on the same machine is reached as `DB_HOST=host.docker.internal`. The database and its user must exist (`CREATE DATABASE pvzge; GRANT ALL ON pvzge.* TO 'pvzge'@'%' IDENTIFIED BY '...';`); the tables are created on the first start. Without these variables the server keeps using files in `DATA_DIR`, as before.
 
-- To use an existing MariaDB/MySQL server instead, give the `server/` process `DATABASE_URL=mariadb://user:password@host:3306/pvzge` (or `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`). Without them the server keeps using files in `DATA_DIR`, as before.
-- The tables are created on the first start, and an older install's `DATA_DIR/db.json` and save files are imported automatically (accounts, passwords, sessions, saves and their backups, match history); `db.json` is then renamed to `db.json.migrated`.
 - Tables: `users`, `sessions`, `saves` (current cloud save), `save_history` (the previous `SAVE_HISTORY` versions of each save, default 20; players restore them in Extras → Cloud, admins through the API), `save_profiles` (one row per game profile: name, coins, gems, world keys, tickets, sprouts and the profile JSON), `matches`, `scores` and `achievements`.
-- Synchronizing with other tools: change a save from outside by writing `saves.data` and setting `saves.updated_at` to the current time in milliseconds (`UNIX_TIMESTAMP()*1000`); within `DB_SYNC_SECONDS` (default 30) the server picks it up, refreshes `save_profiles`, and the player's game downloads it on its next sync.
+- Synchronizing with other tools: change a save from outside by writing `saves.data` and setting `saves.updated_at` to the current time in milliseconds (`UNIX_TIMESTAMP()*1000`); within `DB_SYNC_SECONDS` (default 30) the server picks it up (and accounts added or whose password changed in the database), refreshes `save_profiles`, and the player's game downloads it on its next sync.
 - `node cli.js users` / `password` work with either storage.
+
+#### Legacy import (save JSON files into the database)
+
+- **Automatic**: on the first start against an empty database, `DATA_DIR/db.json` and `DATA_DIR/saves/*.json` (the old file storage) are imported (accounts with their passwords, sessions, saves and their `.bak` backups, match history, scores, achievements); `db.json` is then renamed to `db.json.migrated`.
+- **Any time**, also into a database already in use: `node cli.js import-legacy <dir>` (Docker: `docker compose exec multiplayer node cli.js import-legacy /data`, or `/data` renamed: point it at the folder that has `db.json` and `saves/`). It merges: accounts that already exist (same id or username) are kept, a legacy save replaces the database one only when it is newer (`--overwrite`: always; the replaced save goes to `save_history`), and running it again changes nothing. A running server sees the imported accounts within `DB_SYNC_SECONDS`.
+- **One save file**: `node cli.js import-save <user> <file.json>` replaces a player's cloud save with a save `.json`: an export from the game's Account window, a cloud save (`{"data": ...}`), the raw `PvZ2_PlayerProperties` value or `{"PvZ2_PlayerProperties": ..., "PvZ2_Settings": ...}`. Works with either storage, with the server running or stopped; the previous save is kept (history / `.bak`).
 
 ### Português (pt-BR)
 

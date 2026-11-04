@@ -1,11 +1,12 @@
 # Self-hosted game + multiplayer server (signaling, accounts, cloud saves,
-# public rooms, match history, leaderboards, achievements) + MariaDB:
+# public rooms, match history, leaderboards, achievements):
 #   docker compose up -d --build --remove-orphans   ->   http://localhost:8080
 #
-# Set at least DB_PASSWORD and DB_ROOT_PASSWORD in a .env file next to this
-# one (or in the stack's environment variables in Portainer).
-# Optional database web UI (Adminer) on http://localhost:8081:
-#   docker compose --profile tools up -d
+# Data goes to your external MariaDB (or MySQL) server: set DB_HOST, DB_USER,
+# DB_PASSWORD and DB_NAME (or DATABASE_URL) in a .env file next to this one or
+# in the stack's environment variables (Portainer). The database and the user
+# must exist; the tables are created on the first start. Without DB_HOST /
+# DATABASE_URL everything is stored in files in the multiplayer-data volume.
 services:
   game:
     build: .
@@ -28,20 +29,24 @@ services:
       ADMIN_USERS: "${ADMIN_USERS:-}"
       # "all" lets every logged-in player import save files (default: admins).
       SAVE_IMPORT: "${SAVE_IMPORT:-admins}"
-      # Everything is stored in MariaDB. On the first start the accounts and
-      # saves of an older install (the multiplayer-data volume) are imported.
-      DB_HOST: mariadb
+      # External MariaDB. On the first start against an empty database the
+      # accounts and saves of the multiplayer-data volume are imported; at any
+      # time `docker compose exec multiplayer node cli.js import-legacy /data`
+      # merges them again (see README, "Legacy import").
+      DB_HOST: "${DB_HOST:-}"
+      DB_PORT: "${DB_PORT:-3306}"
       DB_NAME: "${DB_NAME:-pvzge}"
       DB_USER: "${DB_USER:-pvzge}"
-      DB_PASSWORD: "${DB_PASSWORD:-change-me}"
+      DB_PASSWORD: "${DB_PASSWORD:-}"
+      DATABASE_URL: "${DATABASE_URL:-}"
       # Previous versions kept per cloud save (restorable in the game).
       SAVE_HISTORY: "${SAVE_HISTORY:-20}"
     volumes:
-      # Older installs kept their data here; still used for the migration.
+      # File storage (without a database) and the legacy data to import.
       - multiplayer-data:/data
-    depends_on:
-      mariadb:
-        condition: service_healthy
+    # Lets DB_HOST=host.docker.internal reach a MariaDB on this same machine.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       default:
         # Also reachable by the service name used by older compose files.
@@ -49,36 +54,5 @@ services:
           - signaling
     restart: unless-stopped
 
-  mariadb:
-    image: mariadb:11.4
-    environment:
-      MARIADB_DATABASE: "${DB_NAME:-pvzge}"
-      MARIADB_USER: "${DB_USER:-pvzge}"
-      MARIADB_PASSWORD: "${DB_PASSWORD:-change-me}"
-      MARIADB_ROOT_PASSWORD: "${DB_ROOT_PASSWORD:-change-me-too}"
-    command: ["--max-allowed-packet=64M", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
-    volumes:
-      # Accounts, cloud saves and history live here: keep this volume.
-      - mariadb-data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-      start_period: 20s
-    restart: unless-stopped
-
-  adminer:
-    image: adminer:4.8.1
-    profiles: ["tools"]
-    ports:
-      - "8081:8080"
-    environment:
-      ADMINER_DEFAULT_SERVER: mariadb
-    depends_on:
-      - mariadb
-    restart: unless-stopped
-
 volumes:
   multiplayer-data:
-  mariadb-data:

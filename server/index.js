@@ -383,6 +383,19 @@ app.post('/local/users/:name/password', localOnly, json, wrap(async (req, res) =
   res.json({ ok: true, username: u.username });
 }));
 
+// Imports a save file for a player (cli.js import-save).
+app.post('/local/users/:name/save', localOnly, bigJson, wrap(async (req, res) => {
+  const u = store.findUser(req.params.name);
+  if (!u) return res.status(404).json({ error: 'not_found' });
+  const data = req.body && req.body.data;
+  const bad = validSave(data);
+  if (bad) return res.status(400).json({ error: bad });
+  await store.backupSave(u.id);
+  const saved = await store.writeSave(u.id, data, 'import', 'import');
+  console.log('[cli] save imported for %s', u.username);
+  res.json({ ok: true, username: u.username, save: saved });
+}));
+
 // Public rooms -----------------------------------------------------------
 
 const rooms = new Map();

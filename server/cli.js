@@ -5,6 +5,13 @@
  *   node cli.js users                       list every account
  *   node cli.js password <user> [password]  set a new password (random if
  *                                           omitted); the user's sessions end
+ *   node cli.js import-save <user> <file>   replace a player's cloud save with
+ *                                           a save .json (game export, cloud
+ *                                           save or raw localStorage value)
+ *   node cli.js import-legacy <dir> [--overwrite]
+ *                                           MariaDB: merge an old file-store
+ *                                           data dir (db.json + saves/) into
+ *                                           the database
  *
  * Run it on the machine/container of the server (Docker: open a console on
  * the "multiplayer" container, or `docker compose exec multiplayer node cli.js users`).
@@ -135,7 +142,53 @@ async function password(name, pass) {
   console.log('Log in with it in the game (Account), then change it if you like.');
 }
 
+async function importSave(name, file) {
+  if (!name || !file) fail('Usage: node cli.js import-save <user> <save.json>');
+  let text;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (e) {
+    fail('Cannot read ' + file + ': ' + e.message);
+  }
+  let data;
+  try {
+    data = require('./store').normalizeSave(text);
+  } catch (e) {
+    fail(file + ' is not a save file: ' + e.message);
+  }
+  const profiles = JSON.parse(JSON.parse(data).players).map((p) => p.name || '?');
+  const r = await call('POST', '/local/users/' + encodeURIComponent(name) + '/save', { data });
+  let username;
+  if (r) {
+    if (r.status === 404) fail('No account named "' + name + '". See: node cli.js users');
+    if (r.status !== 200) fail('The server refused the save (' + r.status + (r.json && r.json.error ? ', ' + r.json.error : '') + ').');
+    username = r.json.username;
+  } else {
+    const store = await offlineStore();
+    const u = store.findUser(name);
+    if (!u) fail('No account named "' + name + '". See: node cli.js users');
+    await store.backupSave(u.id);
+    await store.writeSave(u.id, data, 'import', 'import');
+    await store.close();
+    username = u.username;
+  }
+  console.log('Save imported for ' + username + ' (' + profiles.length + ' profile(s): ' + profiles.join(', ') + ').');
+  console.log('The previous save was kept; the game downloads the new one on its next sync.');
+}
+
+async function importLegacy(dir, flag) {
+  if (!dir) fail('Usage: node cli.js import-legacy <data dir with db.json and saves/> [--overwrite]');
+  if (!require('./store').dbConfigured(process.env)) fail('import-legacy imports into MariaDB: set DB_HOST (or DATABASE_URL) like the server.');
+  const store = await offlineStore();
+  const r = await store.importLegacy(path.resolve(dir), { overwrite: flag === '--overwrite' });
+  await store.close();
+  console.log('Accounts: ' + r.users + ' imported, ' + r.usersKept + ' already in the database.');
+  console.log('Saves: ' + r.saves + ' imported, ' + r.savesKept + ' kept (the database copy is as new or newer; --overwrite replaces them).');
+  console.log('Also: ' + r.history + ' old backup(s), ' + r.sessions + ' session(s), ' + r.matches + ' match(es), ' + r.scores + ' score(s), ' + r.achievements + ' achievement(s).');
+  console.log('A running server picks the new accounts and saves up within DB_SYNC_SECONDS.');
+}
+
 const [cmd, a, b] = process.argv.slice(2);
-(cmd === 'users' ? users() : cmd === 'password' ? password(a, b) : Promise.resolve(console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(2, 14).map((l) => l.replace(/^ \*? ?/, '')).join('\n'))))
+(cmd === 'users' ? users() : cmd === 'password' ? password(a, b) : cmd === 'import-save' ? importSave(a, b) : cmd === 'import-legacy' ? importLegacy(a, b) : Promise.resolve(console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(2, 22).map((l) => l.replace(/^ \*? ?/, '')).join('\n'))))
   .then(() => process.exit(0))
   .catch((e) => fail(e.message));

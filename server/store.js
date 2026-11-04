@@ -61,6 +61,27 @@ function profileSummary(data) {
   }
 }
 
+// Any save file people have (an export from the game's Account window, a
+// cloud save {data}, the raw localStorage value, {PvZ2_PlayerProperties}...)
+// -> the cloud save text {"v":1,"players":"<json>","settings":...}. Throws
+// on anything else.
+function normalizeSave(text) {
+  let o = typeof text === 'string' ? JSON.parse(text) : text;
+  if (o && typeof o === 'object' && !Array.isArray(o) && typeof o.data === 'string' && o.players == null) o = JSON.parse(o.data);
+  let players = null;
+  let settings = null;
+  if (Array.isArray(o)) players = o;
+  else if (o && typeof o === 'object') {
+    const pl = o.players != null ? o.players : o.PvZ2_PlayerProperties;
+    const st = o.settings != null ? o.settings : o.PvZ2_Settings;
+    players = typeof pl === 'string' ? JSON.parse(pl) : pl;
+    settings = st == null ? null : typeof st === 'string' ? st : JSON.stringify(st);
+  }
+  const ok = Array.isArray(players) && players.length > 0 && players.every((p) => p && typeof p === 'object' && !Array.isArray(p));
+  if (!ok) throw new Error('not a PvZ2 Gardendless save (no player profiles found)');
+  return JSON.stringify({ v: 1, players: JSON.stringify(players), settings });
+}
+
 /*
  * The shared model. Subclasses persist it: every change calls one of the
  * persist* hooks (no-ops here).
@@ -430,4 +451,4 @@ async function openStore(env, dataDir) {
   return new FileStore(dataDir);
 }
 
-module.exports = { BaseStore, FileStore, Store: FileStore, openStore, dbConfigured, profileSummary, atomicWrite, MAX_MATCHES, MAX_SCORES };
+module.exports = { BaseStore, FileStore, Store: FileStore, openStore, dbConfigured, profileSummary, normalizeSave, atomicWrite, MAX_MATCHES, MAX_SCORES };
