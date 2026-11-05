@@ -114,6 +114,29 @@
       ]),
     );
 
+    var iv = X.inverted.options;
+    cards.appendChild(
+      el('div.mp-panel.pvzx-mode', null, [
+        el('div.mp-panel-title', { text: '🔄 ' + t('mode_inverted') }),
+        el('p.pvzx-desc', { text: t('mode_inverted_desc') }),
+        opt(t('arena'), seg(stageOptions(), iv.stage, function (v) {
+          iv.stage = v;
+          render();
+        })),
+        opt(t('difficulty'), seg(['easy', 'normal', 'hard'].map(function (d) {
+          return { value: d, label: t('difficulty_' + d) };
+        }), iv.difficulty, function (v) {
+          iv.difficulty = v;
+          render();
+        })),
+        el('p.pvzx-muted', { text: t('inv_help') }),
+        X.inverted.best() ? el('div.pvzx-best', { text: t('inv_best', { n: X.inverted.best() }) }) : null,
+        el('button.mp-btn.mp-green', { text: t('play'), onclick: function () {
+          X.inverted.start(iv);
+        } }),
+      ]),
+    );
+
     var daily = el('div.mp-panel.pvzx-mode', null, [el('div.mp-panel-title', { text: '📅 ' + t('mode_daily') }), el('p.pvzx-desc', { text: t('mode_daily_desc') })]);
     var dailyInfo = el('div.pvzx-daily', { text: t('loading') });
     daily.appendChild(dailyInfo);
@@ -260,6 +283,9 @@
       }));
       wrap.appendChild(board(t('ranking_survival'), 'survival', function (n) {
         return t('wave_n', { n: n });
+      }));
+      wrap.appendChild(board(t('ranking_inverted'), 'challenge:inverted', function (n) {
+        return t('points', { n: n });
       }));
     });
   }

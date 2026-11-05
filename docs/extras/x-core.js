@@ -14,7 +14,7 @@
 
   var MP = window.PvZMP;
   var X = (window.PvZX = new MP.Emitter());
-  X.VERSION = '1.0.1';
+  X.VERSION = '1.1.0';
 
   /* ------------------------------------------------------------ storage */
 
@@ -94,6 +94,17 @@
       mode_endless: 'Sobrevivência sem fim',
       mode_endless_desc: 'Ondas cada vez maiores até você perder. Seu recorde vai para o placar.',
       mode_daily: 'Desafio Diário',
+      mode_inverted: "Modo Invertido",
+      mode_inverted_desc: "Os papéis se invertem: as plantas avançam pelo gramado e você defende com zumbis. Escolha um zumbi na barra e clique numa casa da metade direita: ele fica ali segurando a linha. Se uma planta passar da última coluna, você perde.",
+      inv_wave: "Onda {n}/{total}",
+      inv_killed: "{n} plantas derrotadas",
+      inv_won: "Os zumbis resistiram!",
+      inv_lost: "As plantas passaram!",
+      inv_again: "Jogar de novo",
+      inv_menu: "Menu",
+      inv_best: "Recorde: {n} pts",
+      inv_help: "Teclas 1-6 escolhem o zumbi; botão direito cancela. Cérebros: renda contínua e bônus por planta derrotada.",
+      ranking_inverted: "Modo Invertido",
       mode_daily_desc: 'Uma fase nova a cada dia, igual para todos: arena, plantas e mutadores sorteados. Uma tentativa vale para o placar do dia.',
       arena: 'Arena',
       sandbox_waves: 'Ondas de zumbis',
@@ -239,6 +250,17 @@
       mode_endless: 'Endless Survival',
       mode_endless_desc: 'Ever bigger waves until you lose. Your best run goes to the leaderboard.',
       mode_daily: 'Daily Challenge',
+      mode_inverted: "Inverted Mode",
+      mode_inverted_desc: "Roles reversed: the plants march across the lawn and you defend with zombies. Pick a zombie on the bar and click a square of the right half: it holds that line. If a plant walks past the last column, you lose.",
+      inv_wave: "Wave {n}/{total}",
+      inv_killed: "{n} plants defeated",
+      inv_won: "The zombies held!",
+      inv_lost: "The plants broke through!",
+      inv_again: "Play again",
+      inv_menu: "Menu",
+      inv_best: "Best: {n} pts",
+      inv_help: "Keys 1-6 pick a zombie; right click cancels. Brains: steady income plus a bonus per plant defeated.",
+      ranking_inverted: "Inverted Mode",
       mode_daily_desc: 'A new level every day, the same for everyone: random arena, plants and mutators. Your best score counts for the day\'s leaderboard.',
       arena: 'Arena',
       sandbox_waves: 'Zombie waves',
@@ -376,6 +398,17 @@
       mode_endless: '无尽生存',
       mode_endless_desc: '波次越来越强，直到失败。最佳成绩进入排行榜。',
       mode_daily: '每日挑战',
+      mode_inverted: "反转模式",
+      mode_inverted_desc: "角色互换：植物在草坪上前进，你用僵尸防守。在僵尸栏选择僵尸，点击右半边的格子，它会守住那条防线。若有植物越过最后一列，你就输了。",
+      inv_wave: "第 {n}/{total} 波",
+      inv_killed: "击败 {n} 株植物",
+      inv_won: "僵尸守住了！",
+      inv_lost: "植物突破了！",
+      inv_again: "再玩一次",
+      inv_menu: "菜单",
+      inv_best: "最佳：{n} 分",
+      inv_help: "按 1-6 选择僵尸；右键取消。脑子：持续收入，每击败一株植物另有奖励。",
+      ranking_inverted: "反转模式",
       mode_daily_desc: '每天一个新关卡，所有人相同：随机场地、植物和变异。当天最高分计入排行榜。',
       arena: '场地',
       sandbox_waves: '僵尸波次',

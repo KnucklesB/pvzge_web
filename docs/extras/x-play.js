@@ -761,6 +761,17 @@
     X.emit('summary', s, card.querySelector('.pvzx-summary-extra'));
   }
 
+  // Ends the level from a mode that decides the result itself (inverted).
+  play.finish = function (result, opts) {
+    if (!stats || stats.result) return;
+    tracked.over = true;
+    stats.result = result;
+    stats.mowersUsed = 0;
+    stats.endedAt = Date.now();
+    X.emit('level-end', stats);
+    if (X.settings.summary && !(opts && opts.noSummary)) setTimeout(showSummary, 1200, stats);
+  };
+
   play.summaryNote = function (text, cls) {
     var box = summary && summary.querySelector('.pvzx-summary-extra');
     if (box) box.appendChild(el('div' + (cls ? '.' + cls : ''), { text: text }));
