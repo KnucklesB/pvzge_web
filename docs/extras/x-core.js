@@ -14,7 +14,7 @@
 
   var MP = window.PvZMP;
   var X = (window.PvZX = new MP.Emitter());
-  X.VERSION = '1.1.0';
+  X.VERSION = '1.4.0';
 
   /* ------------------------------------------------------------ storage */
 
@@ -97,6 +97,17 @@
       mode_inverted: "Modo Invertido",
       mode_inverted_desc: "Os papéis se invertem: as plantas avançam pelo gramado e você defende com zumbis. Escolha um zumbi na barra e clique numa casa da metade direita: ele fica ali segurando a linha. Se uma planta passar da última coluna, você perde.",
       inv_wave: "Onda {n}/{total}",
+      mode_mirror: "Modo Espelhado",
+      mode_mirror_desc: "O Modo Invertido de trás para frente: as plantas entram pela direita, viradas para a esquerda, e avançam atirando nos seus zumbis, que defendem a metade esquerda virados para a direita. Escolha um zumbi e clique numa casa da metade esquerda.",
+      ranking_mirror: "Modo Espelhado",
+      inv_f_advance: "Avanço",
+      inv_f_wall: "Muralha",
+      inv_f_rush: "Investida",
+      inv_f_artillery: "Artilharia",
+      inv_f_focus: "Ataque concentrado",
+      inv_f_elite: "Elite",
+      inv_f_huge: "Onda gigante!",
+      inv_jalapeno: "Jalapenho na linha {n}! Saia da frente!",
       inv_killed: "{n} plantas derrotadas",
       inv_won: "Os zumbis resistiram!",
       inv_lost: "As plantas passaram!",
@@ -253,6 +264,17 @@
       mode_inverted: "Inverted Mode",
       mode_inverted_desc: "Roles reversed: the plants march across the lawn and you defend with zombies. Pick a zombie on the bar and click a square of the right half: it holds that line. If a plant walks past the last column, you lose.",
       inv_wave: "Wave {n}/{total}",
+      mode_mirror: "Mirrored Mode",
+      mode_mirror_desc: "The Inverted Mode back to front: the plants come in from the right, turned to face left, and march shooting at your zombies, who defend the left half facing right. Pick a zombie and click a square of the left half.",
+      ranking_mirror: "Mirrored Mode",
+      inv_f_advance: "Advance",
+      inv_f_wall: "Wall",
+      inv_f_rush: "Rush",
+      inv_f_artillery: "Artillery",
+      inv_f_focus: "Focused attack",
+      inv_f_elite: "Elite",
+      inv_f_huge: "Huge wave!",
+      inv_jalapeno: "Jalapeno on lane {n}! Get out of the way!",
       inv_killed: "{n} plants defeated",
       inv_won: "The zombies held!",
       inv_lost: "The plants broke through!",
@@ -401,6 +423,17 @@
       mode_inverted: "反转模式",
       mode_inverted_desc: "角色互换：植物在草坪上前进，你用僵尸防守。在僵尸栏选择僵尸，点击右半边的格子，它会守住那条防线。若有植物越过最后一列，你就输了。",
       inv_wave: "第 {n}/{total} 波",
+      mode_mirror: "镜像模式",
+      mode_mirror_desc: "反转模式的镜像：植物从右边进入，面朝左方边射击边前进；你的僵尸面朝右方防守左半边。选择僵尸并点击左半边的格子。",
+      ranking_mirror: "镜像模式",
+      inv_f_advance: "推进",
+      inv_f_wall: "城墙",
+      inv_f_rush: "突袭",
+      inv_f_artillery: "炮兵",
+      inv_f_focus: "集中攻击",
+      inv_f_elite: "精英",
+      inv_f_huge: "超大波次！",
+      inv_jalapeno: "第 {n} 行有火爆辣椒！快躲开！",
       inv_killed: "击败 {n} 株植物",
       inv_won: "僵尸守住了！",
       inv_lost: "植物突破了！",
