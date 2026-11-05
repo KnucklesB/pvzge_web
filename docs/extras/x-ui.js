@@ -114,6 +114,29 @@
       ]),
     );
 
+    var iv = X.inverted.options;
+    cards.appendChild(
+      el('div.mp-panel.pvzx-mode', null, [
+        el('div.mp-panel-title', { text: '🔄 ' + t('mode_inverted') }),
+        el('p.pvzx-desc', { text: t('mode_inverted_desc') }),
+        opt(t('arena'), seg(stageOptions(), iv.stage, function (v) {
+          iv.stage = v;
+          render();
+        })),
+        opt(t('difficulty'), seg(['easy', 'normal', 'hard'].map(function (d) {
+          return { value: d, label: t('difficulty_' + d) };
+        }), iv.difficulty, function (v) {
+          iv.difficulty = v;
+          render();
+        })),
+        el('p.pvzx-muted', { text: t('inv_help') }),
+        X.inverted.best() ? el('div.pvzx-best', { text: t('inv_best', { n: X.inverted.best() }) }) : null,
+        el('button.mp-btn.mp-green', { text: t('play'), onclick: function () {
+          X.inverted.start(iv);
+        } }),
+      ]),
+    );
+
     var daily = el('div.mp-panel.pvzx-mode', null, [el('div.mp-panel-title', { text: '📅 ' + t('mode_daily') }), el('p.pvzx-desc', { text: t('mode_daily_desc') })]);
     var dailyInfo = el('div.pvzx-daily', { text: t('loading') });
     daily.appendChild(dailyInfo);
@@ -261,6 +284,9 @@
       wrap.appendChild(board(t('ranking_survival'), 'survival', function (n) {
         return t('wave_n', { n: n });
       }));
+      wrap.appendChild(board(t('ranking_inverted'), 'challenge:inverted', function (n) {
+        return t('points', { n: n });
+      }));
     });
   }
 
@@ -270,7 +296,60 @@
     return ts ? new Date(ts).toLocaleString() : '-';
   }
 
+  // Restoring a save from a .json file: the game's own export, a cloud save
+  // or the raw localStorage value (MP.saves.parse). With a multiplayer server
+  // the server decides who may import (ADMIN_USERS / SAVE_IMPORT=all), as in
+  // the Account window; without one, this browser's save is the only one.
+  function canImport() {
+    return !X.api.available() || !!(MP.api && MP.api.can('importSave'));
+  }
+
+  function importFile() {
+    if (!canImport()) return;
+    var picker = el('input', { type: 'file', accept: '.json,application/json,text/plain' });
+    picker.onchange = function () {
+      var file = picker.files && picker.files[0];
+      if (!file) return;
+      file.text().then(function (text) {
+        var blob;
+        try {
+          blob = MP.saves.parse(text);
+        } catch (e) {
+          return MP.ui.toast(t('file_bad'), 'warn');
+        }
+        var names = MP.saves.profileNames(blob);
+        if (!window.confirm(t('file_confirm', { name: file.name, profiles: names.join(', ') }))) return;
+        if (!MP.saves.canApply()) return MP.ui.toast(t('file_only_menu'), 'warn');
+        MP.saves.applyLocal(blob);
+        MP.ui.toast(t(X.api.loggedIn() ? 'file_applied_cloud' : 'file_applied'), 'good', 6000);
+      });
+    };
+    picker.click();
+  }
+
+  function exportFile() {
+    var blob = MP.saves.readLocal();
+    if (!blob.players) return MP.ui.toast(t('file_empty'), 'warn');
+    MP.saves.download(blob, MP.api && MP.api.user() ? MP.api.user().username : '');
+  }
+
+  function renderFilePanel(body) {
+    var allowed = canImport();
+    body.appendChild(
+      el('div.mp-panel', null, [
+        el('div.mp-panel-title', { text: t('file_title') }),
+        el('p.pvzx-desc', { text: t('file_desc') }),
+        el('div.pvzx-file-actions', null, [
+          el('button.mp-btn.mp-small.mp-green', { text: t('file_import'), disabled: !allowed, onclick: importFile }),
+          el('button.mp-btn.mp-small.mp-blue', { text: t('file_export'), onclick: exportFile }),
+        ]),
+        allowed ? null : el('p.pvzx-muted', { text: t(X.api.loggedIn() ? 'file_forbidden' : 'file_login') }),
+      ]),
+    );
+  }
+
   function renderCloud(body) {
+    renderFilePanel(body);
     if (!X.api.available()) {
       body.appendChild(el('p.pvzx-muted', { text: t('cloud_offline') }));
       return;

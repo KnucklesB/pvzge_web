@@ -43,6 +43,7 @@
     { id: 'daily_streak', icon: '🔥', check: function () { return streak() >= 3; } },
     { id: 'sandbox', icon: '🧪', check: function (s) { return s.mode === 'sandbox'; } },
     { id: 'mutated', icon: '🧬', check: function (s) { return won(s) && campaignLike(s) && s.mutators.length >= 3; } },
+    { id: 'inverted_win', icon: '🔄', check: function (s) { return s.mode === 'inverted' && won(s); } },
     { id: 'speed_demon', icon: '⚡', check: function (s) { return won(s) && campaignLike(s) && s.maxSpeed >= 4; } },
   ];
 
@@ -68,6 +69,7 @@
       daily_streak: ['Em sequência', 'Jogue o Desafio Diário 3 dias seguidos.'],
       sandbox: ['Cientista', 'Jogue no Sandbox.'],
       mutated: ['Mutante', 'Vença uma fase com 3 ou mais mutadores.'],
+      inverted_win: ['Mundo invertido', 'Vença o Modo Invertido.'],
       speed_demon: ['Pisando fundo', 'Vença uma fase jogando a 4x ou mais.'],
     },
     en: {
@@ -91,6 +93,7 @@
       daily_streak: ['On a streak', 'Play the Daily Challenge 3 days in a row.'],
       sandbox: ['Scientist', 'Play in the Sandbox.'],
       mutated: ['Mutant', 'Win a level with 3 or more mutators.'],
+      inverted_win: ['Upside down', 'Win the Inverted Mode.'],
       speed_demon: ['Pedal to the metal', 'Win a level playing at 4x or faster.'],
     },
     zh: {
@@ -114,6 +117,7 @@
       daily_streak: ['连胜', '连续 3 天玩每日挑战。'],
       sandbox: ['科学家', '在沙盒中游玩。'],
       mutated: ['变异体', '启用 3 个以上变异赢得关卡。'],
+      inverted_win: ['颠倒世界', '赢得反转模式。'],
       speed_demon: ['油门踩到底', '以 4 倍或更快速度赢得关卡。'],
     },
   };
