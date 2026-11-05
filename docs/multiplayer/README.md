@@ -107,6 +107,8 @@ PC as the guest) keeps the match running.
 | GET | `/api/daily` | `{date, seed}` of the daily challenge (server date) |
 | GET/POST | `/api/scores/:board` | leaderboards `daily:YYYY-MM-DD`, `survival`; posting keeps each account's best |
 | GET/PUT | `/api/achievements` | the account's achievements; PUT `{ids}` merges (never removes) |
+| GET | `/api/branding`, `/api/branding/img/:id` | logos / images replacing the game's (immutable images, cached) |
+| POST/PUT | `/api/admin/branding/img`, `/api/admin/branding` | admin: upload an image (`{data: dataURL}` → `{id}`), save the branding config |
 
 Storage is files in `DATA_DIR` or MariaDB (`DB_HOST` / `DATABASE_URL`, see
 `server/db-mariadb.js`). Passwords are hashed with scrypt, sessions are random bearer tokens stored

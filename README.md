@@ -77,6 +77,7 @@ Point the server at your MariaDB (or MySQL) server with `DB_HOST`, `DB_PORT` (33
 
 - Tables: `users`, `sessions`, `saves` (current cloud save), `save_history` (the previous `SAVE_HISTORY` versions of each save, default 20; players restore them in Extras → Cloud, admins through the API), `save_profiles` (one row per game profile: name, coins, gems, world keys, tickets, sprouts and the profile JSON), `matches`, `scores` and `achievements`.
 - Synchronizing with other tools: change a save from outside by writing `saves.data` and setting `saves.updated_at` to the current time in milliseconds (`UNIX_TIMESTAMP()*1000`); within `DB_SYNC_SECONDS` (default 30) the server picks it up (and accounts added or whose password changed in the database), refreshes `save_profiles`, and the player's game downloads it on its next sync.
+- Tables also include `branding_images` (logos / images uploaded in Extras → Visual; `meta.branding` says which game image each one replaces).
 - `node cli.js users` / `password` work with either storage.
 
 #### Legacy import (save JSON files into the database)
@@ -107,8 +108,9 @@ Click **Extras** on the main menu for single-player additions (they never modify
 | **Achievements** | 21 achievements (no mowers, minimalist, untouchable, speedrun, 1,000 zombies, endless waves, daily streak...), kept in the browser and merged with the account when logged in. |
 | **Leaderboard** | Today's challenge and Endless Survival (needs the multiplayer server and an account). |
 | **Cloud** | **Import save (.json)** to restore a save file (the game's export, a cloud save or the raw localStorage value; it replaces this browser's progress and, when logged in, is uploaded with the previous save kept in the history; with a server only `ADMIN_USERS`, or everyone with `SAVE_IMPORT=all`), **Export save (.json)**, the profiles in your cloud save and its earlier versions, restorable in one click. |
+| **Visual** (admins) | Replace the game's logos and images for every player of the server: browser tab title and icon, a logo of your own over the menu (position and size sliders), the menu background (which carries the game's logo), the loading screen background and logo, the **zombie faces** of each world (the head of the world's zombies, with the jaw kept, hidden or replaced; it applies to every zombie sharing that world's texture: basic, cone, bucket, flag...), and any other game image by its name (buttons, icons...), with live preview, the original's size shown and **Download original** to edit it. Images are stored on the server (MariaDB table `branding_images`, or `DATA_DIR/branding`) and applied from the first frame, loading screen included. Without a server, put `branding/branding.json` (the tab shows the format) and the images next to `index.html`. |
 
-The code lives in [`docs/extras`](docs/extras) (`x-play.js`: speed, auto-collect, health bars, statistics, preview and summary; `x-modes.js`: modes and mutators; `x-inverted.js`: Inverted and Mirrored modes; `x-achievements.js`; `x-ui.js`: window and menu button).
+The code lives in [`docs/extras`](docs/extras) (`x-play.js`: speed, auto-collect, health bars, statistics, preview and summary; `x-modes.js`: modes and mutators; `x-inverted.js`: Inverted and Mirrored modes; `x-brand.js`: logos and images; `x-achievements.js`; `x-ui.js`: window and menu button).
 
 ## Using Docker
 

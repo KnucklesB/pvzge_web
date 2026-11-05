@@ -29,7 +29,7 @@ const { ExpressPeerServer } = require('peer');
 const { openStore } = require('./store');
 const auth = require('./auth');
 
-const VERSION = '4.0.0';
+const VERSION = '4.1.0';
 const PORT = Number(process.env.PORT) || 9000;
 const MAX_SAVE = (Number(process.env.MAX_SAVE_MB) || 8) * 1024 * 1024;
 const ORIGINS = (process.env.ALLOWED_ORIGINS || '*')
@@ -180,7 +180,7 @@ function optionalUser(req, res, next) {
 /* ------------------------------------------------------------------- API */
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, version: VERSION, storage: store.kind, features: ['accounts', 'saves', 'rooms', 'matches', 'admin', 'history', 'scores', 'achievements', 'daily'] });
+  res.json({ ok: true, version: VERSION, storage: store.kind, features: ['accounts', 'saves', 'rooms', 'matches', 'admin', 'history', 'scores', 'achievements', 'daily', 'branding'] });
 });
 
 // Accounts ---------------------------------------------------------------
@@ -555,6 +555,93 @@ app.post('/api/scores/:board', limit('scores', 20), requireUser, json, (req, res
   }
   res.json(r);
 });
+
+// Branding (logos and game images replaced by admins) -----------------------
+//
+// config: { version, title, icon, menuLogo: {img, x, y, scale}, frames:
+// {"<sprite frame name>": "<image id>"}, faces: {"<world>": {head, jaw,
+// hideJaw}} } - image ids are content hashes, so images are immutable and
+// cached for good.
+
+const BRAND_MIME = { 'image/png': 1, 'image/jpeg': 1, 'image/webp': 1, 'image/gif': 1 };
+const BRAND_ID = /^[a-f0-9]{40}$/;
+const brandJson = express.json({ limit: '12mb' });
+
+function brandingIds(cfg) {
+  const ids = new Set();
+  if (!cfg) return ids;
+  if (cfg.icon) ids.add(cfg.icon);
+  if (cfg.menuLogo && cfg.menuLogo.img) ids.add(cfg.menuLogo.img);
+  Object.values(cfg.frames || {}).forEach((id) => ids.add(id));
+  Object.values(cfg.faces || {}).forEach((f) => {
+    if (f.head) ids.add(f.head);
+    if (f.jaw) ids.add(f.jaw);
+  });
+  return ids;
+}
+
+app.get('/api/branding', limit('rooms', 240), wrap(async (req, res) => {
+  res.json({ branding: (await store.getBranding()) || null });
+}));
+
+app.get('/api/branding/img/:id', limit('brandimg', 600), wrap(async (req, res) => {
+  const id = String(req.params.id || '');
+  if (!BRAND_ID.test(id)) return res.status(404).end();
+  const img = await store.getBrandingImage(id);
+  if (!img) return res.status(404).end();
+  res.setHeader('Content-Type', img.mime);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.end(img.data);
+}));
+
+// {data: "data:image/png;base64,..."} -> {id}
+app.post('/api/admin/branding/img', limit('admin', 120), requireAdmin, brandJson, wrap(async (req, res) => {
+  const m = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(String((req.body && req.body.data) || ''));
+  if (!m || !BRAND_MIME[m[1]]) return res.status(400).json({ error: 'bad_image' });
+  const buf = Buffer.from(m[2], 'base64');
+  if (!buf.length || buf.length > 8 * 1024 * 1024) return res.status(413).json({ error: 'too_large' });
+  const id = require('crypto').createHash('sha1').update(buf).digest('hex');
+  await store.putBrandingImage(id, m[1], buf);
+  res.json({ id, url: '/api/branding/img/' + id });
+}));
+
+app.put('/api/admin/branding', limit('admin', 60), requireAdmin, json, wrap(async (req, res) => {
+  const b = (req.body && req.body.branding) || {};
+  const okId = (v) => (typeof v === 'string' && BRAND_ID.test(v) ? v : null);
+  const num = (v, lo, hi, d) => (Number.isFinite(Number(v)) ? Math.max(lo, Math.min(hi, Number(v))) : d);
+  const frames = {};
+  Object.keys(b.frames || {})
+    .slice(0, 300)
+    .forEach((name) => {
+      const n = clean(name, 80);
+      const id = okId(b.frames[name]);
+      if (n && id) frames[n] = id;
+    });
+  // Zombie faces per world: {world: {head, jaw, hideJaw}}.
+  const faces = {};
+  Object.keys(b.faces || {})
+    .slice(0, 40)
+    .forEach((w) => {
+      const f = b.faces[w] || {};
+      if (!/^[a-z]{2,16}$/.test(w) || !okId(f.head)) return;
+      faces[w] = { head: okId(f.head), jaw: okId(f.jaw), hideJaw: !!f.hideJaw && !okId(f.jaw) };
+    });
+  const cfg = {
+    version: Date.now(),
+    faces,
+    title: clean(b.title, 80),
+    icon: okId(b.icon),
+    menuLogo: b.menuLogo && okId(b.menuLogo.img) ? { img: okId(b.menuLogo.img), x: num(b.menuLogo.x, -1, 1, 0), y: num(b.menuLogo.y, -1, 1, 0.22), scale: num(b.menuLogo.scale, 0.05, 2, 0.55) } : null,
+    frames,
+    updatedBy: req.user.username,
+  };
+  await store.setBranding(cfg);
+  await store.deleteBrandingImages(brandingIds(cfg));
+  console.log('[admin] %s changed the branding (%d image(s))', req.user.username, brandingIds(cfg).size);
+  res.json({ branding: cfg });
+}));
 
 const ACHIEVEMENT = /^[a-z0-9_]{2,40}$/;
 

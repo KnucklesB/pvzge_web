@@ -432,6 +432,52 @@ class FileStore extends BaseStore {
     this.dirty();
     return meta;
   }
+
+  /* branding: config in db.json, images in DATA_DIR/branding/<id> */
+
+  brandingDir() {
+    const dir = path.join(this.dir, 'branding');
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  async getBranding() {
+    return this.db.branding || null;
+  }
+
+  async setBranding(config) {
+    this.db.branding = config;
+    this.flushSync();
+  }
+
+  async putBrandingImage(id, mime, buf) {
+    atomicWrite(path.join(this.brandingDir(), id), buf);
+    this.db.brandingImages = this.db.brandingImages || {};
+    this.db.brandingImages[id] = { mime, size: buf.length, at: Date.now() };
+    this.dirty();
+  }
+
+  async getBrandingImage(id) {
+    const meta = this.db.brandingImages && this.db.brandingImages[id];
+    if (!meta) return null;
+    try {
+      return { mime: meta.mime, data: fs.readFileSync(path.join(this.brandingDir(), id)) };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async deleteBrandingImages(keep) {
+    const imgs = this.db.brandingImages || {};
+    for (const id of Object.keys(imgs)) {
+      if (keep.has(id)) continue;
+      delete imgs[id];
+      try {
+        fs.unlinkSync(path.join(this.brandingDir(), id));
+      } catch (e) {}
+    }
+    this.dirty();
+  }
 }
 
 /* ------------------------------------------------------------- factory */

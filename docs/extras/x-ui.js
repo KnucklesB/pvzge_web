@@ -434,6 +434,434 @@
       });
   }
 
+  /* ------------------------------------------------------------ visual */
+  // Branding editor (x-brand.js): admins replace logos and game images for
+  // every player; without a server the static branding/branding.json is
+  // explained instead.
+
+  var draft = null; // {title, icon, menuLogo:{img,x,y,scale}, frames:{name:img}}; img = {id} | {data}
+  var search = '';
+
+  function visualAllowed() {
+    var api = MP.api;
+    return !X.api.available() || !!(api && api.isAdmin && api.isAdmin());
+  }
+
+  function startDraft() {
+    var raw = X.brand.raw || {};
+    var ref = function (id) {
+      return id ? { id: id } : null;
+    };
+    var frames = {};
+    Object.keys(raw.frames || {}).forEach(function (k) {
+      frames[k] = { id: raw.frames[k] };
+    });
+    var faces = {};
+    Object.keys(raw.faces || {}).forEach(function (w) {
+      var f = raw.faces[w];
+      faces[w] = { head: ref(f.head), jaw: ref(f.jaw), hideJaw: !!f.hideJaw };
+    });
+    draft = {
+      faces: faces,
+      title: raw.title || '',
+      icon: ref(raw.icon),
+      menuLogo: raw.menuLogo ? { img: ref(raw.menuLogo.img), x: raw.menuLogo.x, y: raw.menuLogo.y, scale: raw.menuLogo.scale } : null,
+      frames: frames,
+      dirty: false,
+    };
+  }
+
+  function refUrl(r) {
+    if (!r) return '';
+    return r.data || MP.config.api + '/branding/img/' + r.id;
+  }
+
+  // Live preview of the draft in this browser.
+  function preview() {
+    var frames = {};
+    Object.keys(draft.frames).forEach(function (k) {
+      if (draft.frames[k]) frames[k] = refUrl(draft.frames[k]);
+    });
+    X.brand.apply({
+      title: draft.title,
+      icon: refUrl(draft.icon),
+      menuLogo: draft.menuLogo && draft.menuLogo.img ? { url: refUrl(draft.menuLogo.img), x: draft.menuLogo.x, y: draft.menuLogo.y, scale: draft.menuLogo.scale } : null,
+      frames: frames,
+      faces: draftFaces(refUrl),
+    });
+  }
+
+  // Draft faces with their images turned into URLs (preview) or ids (save).
+  function draftFaces(conv) {
+    var out = {};
+    Object.keys(draft.faces).forEach(function (w) {
+      var f = draft.faces[w];
+      if (f && f.head) out[w] = { head: conv(f.head), jaw: f.jaw ? conv(f.jaw) : null, hideJaw: !!f.hideJaw };
+    });
+    return out;
+  }
+
+  function changed() {
+    draft.dirty = true;
+    preview();
+    render();
+  }
+
+  function pickImage(onPicked) {
+    var input = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif' });
+    input.onchange = function () {
+      var f = input.files && input.files[0];
+      if (!f) return;
+      if (f.size > 8 * 1024 * 1024) return MP.ui.toast(t('vis_too_large'), 'warn');
+      var reader = new FileReader();
+      reader.onload = function () {
+        onPicked({ data: String(reader.result) });
+      };
+      reader.readAsDataURL(f);
+    };
+    input.click();
+  }
+
+  function thumb(url, cls) {
+    return el('div.pvzx-thumb' + (cls ? '.' + cls : ''), null, url ? [el('img', { src: url, alt: '' })] : [el('span', { text: '—' })]);
+  }
+
+  function downloadCanvas(c, name) {
+    var a = el('a', { href: c.toDataURL('image/png'), download: name + '.png' });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  // One replaceable sprite frame (or a group sharing one image).
+  function frameRow(label, names) {
+    var frame = null;
+    names.some(function (n) {
+      frame = X.brand.findFrame(n);
+      return !!frame;
+    });
+    var size = frame ? Math.round((frame._xBrandOrig || frame).originalSize.width) + '×' + Math.round((frame._xBrandOrig || frame).originalSize.height) : '';
+    var cur = draft.frames[names[0]];
+    var orig = thumb(null, 'pvzx-orig');
+    if (frame) {
+      X.brand
+        .originalCanvas(frame)
+        .then(function (c) {
+          orig.replaceChildren(el('img', { src: c.toDataURL(), alt: '' }));
+        })
+        .catch(function () {});
+    }
+    var set = function (r) {
+      names.forEach(function (n) {
+        if (r) draft.frames[n] = r;
+        else delete draft.frames[n];
+      });
+      changed();
+    };
+    return el('div.pvzx-brand-row', null, [
+      el('div.pvzx-brand-name', null, [el('b', { text: label }), el('small', { text: (names.join(', ') + (size ? ' · ' + t('vis_size', { size: size }) : '')) })]),
+      orig,
+      el('span.pvzx-arrow', { text: '→' }),
+      thumb(refUrl(cur)),
+      el('div.pvzx-brand-btns', null, [
+        el('button.mp-btn.mp-small.mp-green', { text: t('vis_choose'), onclick: function () {
+          pickImage(set);
+        } }),
+        cur ? el('button.mp-btn.mp-small.mp-red', { text: t('vis_remove'), onclick: function () {
+          set(null);
+        } }) : null,
+        frame ? el('button.mp-btn.mp-small.mp-blue', { text: t('vis_download'), title: t('vis_download_tip'), onclick: function () {
+          X.brand.originalCanvas(frame).then(function (c) {
+            downloadCanvas(c, names[0]);
+          }).catch(function () {
+            MP.ui.toast(t('vis_no_original'), 'warn');
+          });
+        } }) : null,
+      ]),
+    ]);
+  }
+
+  // One world's zombie face: original -> new head, and the jaw.
+  function faceRow(world) {
+    var f = draft.faces[world] || null;
+    var orig = thumb(null, 'pvzx-orig');
+    var size = el('small');
+    X.brand
+      .originalFace(world, 'head')
+      .then(function (c) {
+        orig.replaceChildren(el('img', { src: c.toDataURL(), alt: '' }));
+        size.textContent = t('vis_size', { size: c.width + '×' + c.height });
+      })
+      .catch(function () {
+        orig.replaceChildren(el('span', { text: '?' }));
+      });
+    var setFace = function (patch) {
+      if (patch === null) delete draft.faces[world];
+      else draft.faces[world] = Object.assign({ head: null, jaw: null, hideJaw: false }, draft.faces[world] || {}, patch);
+      changed();
+    };
+    var jawMode = !f ? 'orig' : f.jaw ? 'img' : f.hideJaw ? 'hide' : 'orig';
+    var jaw = f
+      ? el('div.pvzx-face-jaw', null, [
+          el('span', { text: t('vis_jaw') }),
+          seg(
+            [
+              { value: 'orig', label: t('vis_jaw_orig') },
+              { value: 'hide', label: t('vis_jaw_hide') },
+              { value: 'img', label: t('vis_jaw_img') },
+            ],
+            jawMode,
+            function (v) {
+              if (v === 'img') {
+                pickImage(function (r) {
+                  setFace({ jaw: r, hideJaw: false });
+                });
+              } else setFace({ jaw: null, hideJaw: v === 'hide' });
+            },
+          ),
+        ])
+      : null;
+    return el('div.pvzx-face', null, [
+      el('div.pvzx-brand-row', null, [
+        el('div.pvzx-brand-name', null, [el('b', { text: t('world_' + world) }), size]),
+        orig,
+        el('span.pvzx-arrow', { text: '→' }),
+        thumb(f && refUrl(f.head)),
+        el('div.pvzx-brand-btns', null, [
+          el('button.mp-btn.mp-small.mp-green', { text: t('vis_choose'), onclick: function () {
+            pickImage(function (r) {
+              setFace({ head: r });
+            });
+          } }),
+          f ? el('button.mp-btn.mp-small.mp-red', { text: t('vis_remove'), onclick: function () {
+            setFace(null);
+          } }) : null,
+          el('button.mp-btn.mp-small.mp-blue', { text: t('vis_download'), title: t('vis_download_tip'), onclick: function () {
+            X.brand.originalFace(world, 'head').then(function (c) {
+              downloadCanvas(c, 'face-' + world);
+            }).catch(function () {
+              MP.ui.toast(t('vis_no_original'), 'warn');
+            });
+          } }),
+        ]),
+      ]),
+      jaw,
+    ]);
+  }
+
+  function slider(label, value, min, max, step, onInput) {
+    var out = el('span.pvzx-slider-val', { text: String(value) });
+    var input = el('input', { type: 'range', min: min, max: max, step: step, value: value });
+    input.addEventListener('input', function () {
+      out.textContent = input.value;
+      onInput(Number(input.value));
+    });
+    input.addEventListener('change', function () {
+      render();
+    });
+    return el('label.pvzx-slider', null, [el('span', { text: label }), input, out]);
+  }
+
+  function save() {
+    var refs = [];
+    var collect = function (r) {
+      if (r && r.data) refs.push(r);
+    };
+    collect(draft.icon);
+    if (draft.menuLogo) collect(draft.menuLogo.img);
+    Object.keys(draft.frames).forEach(function (k) {
+      collect(draft.frames[k]);
+    });
+    Object.keys(draft.faces).forEach(function (w) {
+      collect(draft.faces[w].head);
+      collect(draft.faces[w].jaw);
+    });
+    // Same picked image used for several frames: upload it once.
+    var uploads = {};
+    MP.ui.toast(t('vis_saving'), 'good');
+    Promise.all(
+      refs.map(function (r) {
+        if (!uploads[r.data]) uploads[r.data] = MP.api.request('POST', '/admin/branding/img', { data: r.data }, { timeout: 60000 });
+        return uploads[r.data].then(function (res) {
+          r.id = res.id;
+          delete r.data;
+        });
+      }),
+    )
+      .then(function () {
+        var frames = {};
+        Object.keys(draft.frames).forEach(function (k) {
+          frames[k] = draft.frames[k].id;
+        });
+        return MP.api.request('PUT', '/admin/branding', {
+          branding: {
+            title: draft.title,
+            icon: draft.icon && draft.icon.id,
+            menuLogo: draft.menuLogo && draft.menuLogo.img ? { img: draft.menuLogo.img.id, x: draft.menuLogo.x, y: draft.menuLogo.y, scale: draft.menuLogo.scale } : null,
+            frames: frames,
+            faces: draftFaces(function (r) {
+              return r.id;
+            }),
+          },
+        });
+      })
+      .then(function () {
+        return X.brand.reload();
+      })
+      .then(function () {
+        startDraft();
+        MP.ui.toast(t('vis_saved'), 'good', 5000);
+        render();
+      })
+      .catch(function (e) {
+        MP.ui.toast(t('error', { e: (e && (e.code || e.message)) || '?' }), 'bad');
+      });
+  }
+
+  function renderVisual(body) {
+    if (!X.api.available()) {
+      body.appendChild(el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('vis_title') }), el('p.pvzx-desc', { text: t('vis_static') }), el('pre.pvzx-code', { text: t('vis_static_example') })]));
+      return;
+    }
+    if (!draft) startDraft();
+    body.appendChild(el('p.pvzx-desc', { text: t('vis_desc') }));
+
+    // Browser tab
+    body.appendChild(
+      el('div.mp-panel', null, [
+        el('div.mp-panel-title', { text: t('vis_tab') }),
+        (function () {
+          var input = el('input.mp-input', { value: draft.title, maxlength: 80, placeholder: document.title });
+          MP.util.shieldInput(input);
+          input.addEventListener('input', function () {
+            draft.title = input.value;
+            draft.dirty = true;
+            preview();
+          });
+          return opt(t('vis_page_title'), input);
+        })(),
+        el('div.pvzx-brand-row', null, [
+          el('div.pvzx-brand-name', null, [el('b', { text: t('vis_icon') }), el('small', { text: t('vis_icon_tip') })]),
+          thumb(refUrl(draft.icon)),
+          el('div.pvzx-brand-btns', null, [
+            el('button.mp-btn.mp-small.mp-green', { text: t('vis_choose'), onclick: function () {
+              pickImage(function (r) {
+                draft.icon = r;
+                changed();
+              });
+            } }),
+            draft.icon ? el('button.mp-btn.mp-small.mp-red', { text: t('vis_remove'), onclick: function () {
+              draft.icon = null;
+              changed();
+            } }) : null,
+          ]),
+        ]),
+      ]),
+    );
+
+    // Menu logo
+    var ml = draft.menuLogo;
+    var logoPanel = el('div.mp-panel', null, [
+      el('div.mp-panel-title', { text: t('vis_menu_logo') }),
+      el('p.pvzx-muted', { text: t('vis_menu_logo_tip') }),
+      el('div.pvzx-brand-row', null, [
+        el('div.pvzx-brand-name', null, [el('b', { text: t('vis_logo_image') })]),
+        thumb(ml && refUrl(ml.img)),
+        el('div.pvzx-brand-btns', null, [
+          el('button.mp-btn.mp-small.mp-green', { text: t('vis_choose'), onclick: function () {
+            pickImage(function (r) {
+              draft.menuLogo = Object.assign({ x: 0, y: 0.22, scale: 0.55 }, draft.menuLogo || {}, { img: r });
+              changed();
+            });
+          } }),
+          ml ? el('button.mp-btn.mp-small.mp-red', { text: t('vis_remove'), onclick: function () {
+            draft.menuLogo = null;
+            changed();
+          } }) : null,
+        ]),
+      ]),
+    ]);
+    if (ml) {
+      var live = function (k) {
+        return function (v) {
+          draft.menuLogo[k] = v;
+          draft.dirty = true;
+          preview();
+        };
+      };
+      logoPanel.appendChild(slider(t('vis_x'), ml.x || 0, -1, 1, 0.01, live('x')));
+      logoPanel.appendChild(slider(t('vis_y'), ml.y == null ? 0.22 : ml.y, -1, 1, 0.01, live('y')));
+      logoPanel.appendChild(slider(t('vis_scale'), ml.scale || 0.55, 0.05, 1.5, 0.01, live('scale')));
+    }
+    body.appendChild(logoPanel);
+
+    // Shortcuts
+    var quick = el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('vis_quick') }), el('p.pvzx-muted', { text: t('vis_quick_tip') })]);
+    X.brand.SLOTS.forEach(function (s) {
+      quick.appendChild(frameRow(t('vis_slot_' + s[0]), s[1]));
+    });
+    body.appendChild(quick);
+
+    // Zombie faces
+    var facePanel = el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('vis_faces') }), el('p.pvzx-muted', { text: t('vis_faces_tip') })]);
+    if (!(MP.game && MP.game.ready)) facePanel.appendChild(el('p.pvzx-muted', { text: t('loading') }));
+    else
+      X.brand.WORLDS.forEach(function (w) {
+        facePanel.appendChild(faceRow(w[0]));
+      });
+    body.appendChild(facePanel);
+
+    // Any image
+    var slotNames = {};
+    X.brand.SLOTS.forEach(function (s) {
+      s[1].forEach(function (n) {
+        slotNames[n] = true;
+      });
+    });
+    var anyPanel = el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('vis_any') }), el('p.pvzx-muted', { text: t('vis_any_tip') })]);
+    var q = el('input.mp-input', { value: search, placeholder: t('vis_search'), maxlength: 40 });
+    MP.util.shieldInput(q);
+    var results = el('div.pvzx-brand-list');
+    var showResults = function () {
+      results.replaceChildren();
+      if (search.length < 2) return;
+      var list = X.brand.loadedFrames(search).slice(0, 40);
+      if (!list.length) results.appendChild(el('p.pvzx-muted', { text: t('vis_none') }));
+      list.forEach(function (f) {
+        results.appendChild(frameRow(f.name, [f.name]));
+      });
+    };
+    q.addEventListener('input', function () {
+      search = q.value.trim();
+      showResults();
+    });
+    anyPanel.appendChild(q);
+    anyPanel.appendChild(results);
+    showResults();
+    var others = Object.keys(draft.frames).filter(function (n) {
+      return !slotNames[n];
+    });
+    if (others.length) {
+      anyPanel.appendChild(el('div.mp-panel-title', { text: t('vis_replaced') }));
+      others.forEach(function (n) {
+        anyPanel.appendChild(frameRow(n, [n]));
+      });
+    }
+    body.appendChild(anyPanel);
+
+    body.appendChild(
+      el('div.pvzx-file-actions.pvzx-brand-save', null, [
+        el('button.mp-btn.mp-green', { text: t('vis_save'), disabled: !draft.dirty, onclick: save }),
+        el('button.mp-btn.mp-brown', { text: t('vis_discard'), disabled: !draft.dirty, onclick: function () {
+          X.brand.reload().then(function () {
+            startDraft();
+            render();
+          });
+        } }),
+      ]),
+    );
+  }
+
   /* ------------------------------------------------------------ window */
 
   function render() {
@@ -444,7 +872,9 @@
     win.appendChild(el('button.mp-close', { title: t('close'), 'aria-label': t('close'), onclick: ui.close }));
     win.appendChild(el('div.mp-window-title', { text: t('extras_title') }));
     var tabs = el('div.mp-tabs');
-    TABS.forEach(function (k) {
+    var tabs_ = TABS.concat(visualAllowed() ? ['visual'] : []);
+    if (tab === 'visual' && !visualAllowed()) tab = 'modes';
+    tabs_.forEach(function (k) {
       tabs.appendChild(
         el('button.mp-tab' + (tab === k ? '.mp-on' : ''), {
           text: t('tab_' + k),
@@ -459,7 +889,7 @@
     win.appendChild(tabs);
     var body = el('div.mp-tab-body.pvzx-body');
     win.appendChild(body);
-    ({ modes: renderModes, options: renderOptions, mutators: renderMutators, achievements: renderAchievements, ranking: renderRanking, cloud: renderCloud }[tab] || renderModes)(body);
+    ({ modes: renderModes, options: renderOptions, mutators: renderMutators, achievements: renderAchievements, ranking: renderRanking, cloud: renderCloud, visual: renderVisual }[tab] || renderModes)(body);
     node.replaceChildren(win);
     if (scroll && body) body.scrollTop = top;
   }
