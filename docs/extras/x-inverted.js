@@ -13,6 +13,14 @@
  *     out through every wave wins for the zombies.
  * Score (waves held, plants defeated, win bonus) goes to the
  * "challenge:inverted" leaderboard.
+ *
+ * Mirrored variant (opts.mirror, "challenge:mirror" board): the plants come
+ * in from the right and hop to the left, like zombies usually do, and the
+ * zombies hold the left half, turned to face right (Zombie.reversed, the
+ * game's own "walking backwards" zombies, teleported to the left edge).
+ * Plants can't be turned around, so the plants of this variant are walls,
+ * traps, close-combat plants and the ones that also shoot backwards (split
+ * pea, starfruit).
  */
 (function () {
   'use strict';
@@ -38,11 +46,22 @@
   // plants missing from the running game version are skipped.
   var BASE = [['peashooter', 'shoot', 0], ['cabbagepult', 'lob', 0], ['wallnut', 'wall', 1]];
   var ARENA_PLANTS = {
-    modern: [['snowpea', 'shoot', 1], ['repeater', 'shoot', 2], ['kernelpult', 'lob', 2], ['bonkchoy', 'melee', 3], ['chomper', 'melee', 4], ['threepeater', 'shoot', 5], ['tallnut', 'wall', 5], ['melonpult', 'lob', 6], ['spikeweed', 'trap', 3], ['gatling', 'shoot', 9]],
+    modern: [['snowpea', 'shoot', 1], ['repeater', 'shoot', 2], ['kernelpult', 'lob', 2], ['bonkchoy', 'melee', 3], ['chomper', 'melee', 4], ['threepeater', 'shoot', 5], ['tallnut', 'wall', 5], ['melonpult', 'lob', 6], ['gatling', 'shoot', 9]],
     egypt: [['bloomerang', 'shoot', 0], ['bonkchoy', 'melee', 1], ['repeater', 'shoot', 2], ['kernelpult', 'lob', 2], ['iceburg', 'trap', 3], ['snapdragon', 'melee', 4], ['threepeater', 'shoot', 6], ['tallnut', 'wall', 6], ['melonpult', 'lob', 8]],
-    west: [['peapod', 'shoot', 0], ['splitpea', 'shoot', 1], ['lightningreed', 'shoot', 2], ['chilibean', 'trap', 2], ['cactus', 'shoot', 3], ['spikeweed', 'trap', 3], ['melonpult', 'lob', 4], ['tallnut', 'wall', 4], ['wintermelon', 'lob', 8], ['spikerock', 'trap', 7]],
+    west: [['peapod', 'shoot', 0], ['splitpea', 'shoot', 1], ['lightningreed', 'shoot', 2], ['chilibean', 'trap', 2], ['cactus', 'shoot', 3], ['melonpult', 'lob', 4], ['tallnut', 'wall', 4], ['wintermelon', 'lob', 8]],
     future: [['laser_bean', 'shoot', 0], ['starfruit', 'shoot', 1], ['holonut', 'wall', 2], ['homingthistle', 'shoot', 3], ['electricpeashooter', 'shoot', 4], ['citron', 'shoot', 5], ['coconutcannon', 'shoot', 7], ['infinut', 'wall', 6], ['megagatling', 'shoot', 10]],
     dark: [['puffshroom', 'shoot', 0], ['scaredyshroom', 'shoot', 0], ['fumeshroom', 'shoot', 1], ['magnetshroom', 'trap', 2], ['sporeshroom', 'shoot', 3], ['hypnoshroom', 'trap', 4], ['nightshade', 'shoot', 4], ['dusklobber', 'lob', 5], ['gloomshroom', 'melee', 6], ['grimrose', 'melee', 8]],
+  };
+  // Mirrored variant: only plants that work facing away from the zombies.
+  // Roles: wall, melee (hits both sides or around), trap, back (shoots
+  // backwards too).
+  var MIRROR_BASE = [['wallnut', 'wall', 0], ['splitpea', 'back', 0], ['chilibean', 'trap', 0], ['bonkchoy', 'melee', 1], ['potatomine', 'trap', 1], ['starfruit', 'back', 2], ['tallnut', 'wall', 4]];
+  var MIRROR_PLANTS = {
+    modern: [['garlic', 'trap', 2], ['squash', 'melee', 4]],
+    egypt: [['iceburg', 'trap', 1], ['garlic', 'trap', 3]],
+    west: [['chilibean', 'trap', 1], ['explodeonut', 'wall', 5]],
+    future: [['holonut', 'wall', 1], ['empea', 'trap', 3], ['pinkstarfruit', 'back', 4], ['magnetshroom', 'melee', 2]],
+    dark: [['magnetshroom', 'melee', 0], ['gloomshroom', 'melee', 2], ['hypnoshroom', 'trap', 3], ['garlic', 'trap', 4]],
   };
   var SLOW = { wallnut: 1.4, tallnut: 1.7, holonut: 1.4, infinut: 1.4, pumpkin: 1.4 }; // walls walk slower
 
@@ -57,6 +76,7 @@
   ];
 
   inv.options = X.store.get('inverted', { stage: 'modern', difficulty: 'normal' });
+  inv.mirrorOptions = X.store.get('mirror', { stage: 'modern', difficulty: 'normal', mirror: true });
 
   var run = null; // the match being played
   var pendingRestart = null; // "Play again": start once back on the menu
@@ -82,29 +102,49 @@
   }
 
   inv.start = function (opts) {
-    opts = Object.assign({}, inv.options, opts || {});
-    inv.options = opts;
-    X.store.set('inverted', opts);
+    var mirror = !!(opts && opts.mirror);
+    opts = Object.assign({}, mirror ? inv.mirrorOptions : inv.options, opts || {});
+    if (mirror) {
+      inv.mirrorOptions = opts;
+      X.store.set('mirror', opts);
+    } else {
+      inv.options = opts;
+      X.store.set('inverted', opts);
+    }
     if (X.online()) return false;
     var deck = (MP.STAGES[opts.stage] || MP.STAGES.modern).zombies.filter(function (z) {
       return !/_flag$/.test(z);
     });
     run = {
+      mirror: !!opts.mirror,
       opts: opts,
       diff: DIFF[opts.difficulty] || DIFF.normal,
       deckTypes: deck.slice(0, 6),
       started: false,
       over: false,
     };
-    X.modes.current = { kind: 'inverted', id: 'inverted', options: opts, mutators: [] };
+    X.modes.current = { kind: opts.mirror ? 'mirror' : 'inverted', id: opts.mirror ? 'mirror' : 'inverted', options: opts, mutators: [] };
     if (X.ui) X.ui.close();
     G.startCustomLevel(buildLevel(opts));
     return true;
   };
 
   inv.active = function () {
-    return !!(run && X.modes.current && X.modes.current.kind === 'inverted' && G.inLevel());
+    return !!(run && X.modes.current && (X.modes.current.kind === 'inverted' || X.modes.current.kind === 'mirror') && G.inLevel());
   };
+
+  // Direction helpers: plants walk +1 (to the right) or -1 (mirrored).
+  function dir() {
+    return run && run.mirror ? -1 : 1;
+  }
+  // Spawn column counted from the plants' side.
+  function fromSide(c) {
+    return run && run.mirror ? G.Sq().ColumnCount - 1 - c : c;
+  }
+  // Squares where the player may place zombies.
+  function placeable(c) {
+    return run && run.mirror ? c <= 4 : c >= 4;
+  }
 
   /* --------------------------------------------------------- match */
 
@@ -192,7 +232,15 @@
 
   // Plants of this arena available at this wave, optionally of some roles.
   function plantPool(wave, roles) {
-    var list = BASE.concat(ARENA_PLANTS[run.opts.stage] || ARENA_PLANTS.modern).filter(function (p) {
+    var source = run.mirror ? MIRROR_BASE.concat(MIRROR_PLANTS[run.opts.stage] || MIRROR_PLANTS.modern) : BASE.concat(ARENA_PLANTS[run.opts.stage] || ARENA_PLANTS.modern);
+    if (run.mirror && roles) {
+      // The regular formations ask for shooters / lobbers.
+      roles = roles.map(function (x) {
+        return x === 'shoot' || x === 'lob' ? 'back' : x;
+      });
+      if (roles.indexOf('back') >= 0 && roles.indexOf('melee') < 0) roles.push('melee');
+    }
+    var list = source.filter(function (p) {
       return p[2] <= wave && exists(p[0]) && (!roles || roles.indexOf(p[1]) >= 0);
     });
     if (!list.length && roles) return plantPool(wave, null);
@@ -224,7 +272,7 @@
     var out = [];
     var energizeChance = Math.min(0.4, 0.08 + wave * 0.025);
     var add = function (l, c, type, extra) {
-      out.push(Object.assign({ l: l, c: c, type: type, mul: Math.random() < 0.15 ? 0.6 : 1, energized: Math.random() < energizeChance, elite: false }, extra || {}));
+      out.push(Object.assign({ l: l, c: fromSide(c), type: type, mul: Math.random() < 0.15 ? 0.6 : 1, energized: Math.random() < energizeChance, elite: false }, extra || {}));
     };
     var i;
     if (kind === 'wall') {
@@ -241,7 +289,7 @@
       var cheap = plantPool(wave, ['shoot', 'melee', 'trap']);
       for (i = 0; i < Math.min(10, n + 2); i++) add(lanes[i % 5], i < 5 ? 0 : 1, rnd(cheap), { mul: 0.55, energized: false });
     } else if (kind === 'artillery') {
-      var lob = plantPool(wave, ['lob']);
+      var lob = plantPool(wave, run.mirror ? ['trap'] : ['lob']);
       for (i = 0; i < Math.min(10, n); i++) add(lanes[i % 5], i < 5 ? 0 : 1, rnd(lob));
     } else if (kind === 'focus') {
       // Everything on one or two lanes, led by an elite plant.
@@ -323,7 +371,8 @@
     setTimeout(function () {
       if (!run || run !== r || r.over) return;
       // First free square from the left (the jalapeno burns the whole lane).
-      for (var c = 0; c < Sq.ColumnCount; c++) {
+      for (var k = 0; k < Sq.ColumnCount; k++) {
+        var c = fromSide(k);
         var lnc = Sq.getLnC(lane, c);
         if (lnc && !lnc.getAllPlants().length && !zombieAt(lane, c)) {
           Promise.resolve(lnc.SpawnPlantByType('jalapeno')).catch(function () {});
@@ -341,7 +390,8 @@
     var near = zombies().some(function (z) {
       if (Sq.judgeLIndex(z.worldPositionY) !== cell.l) return false;
       var c = Sq.judgeCIndex(z.worldPositionX);
-      return c > cell.c && c <= cell.c + 2;
+      var ahead = (c - cell.c) * dir();
+      return ahead > 0 && ahead <= 2;
     });
     if (!near) return;
     st.fed = true;
@@ -362,13 +412,16 @@
       st.next -= dt;
       if (st.next > 0 || p.leapTween || p.fooding) return;
       st.next = r.diff.step * (SLOW[st.type] || 1) * st.mul * (0.8 + Math.random() * 0.4);
-      if (cell.c >= Sq.ColumnCount - 1) {
+      // A plant sharing its square with a zombie fights it there.
+      if (zombieAt(cell.l, cell.c)) return;
+      var next = cell.c + dir();
+      if (next < 0 || next >= Sq.ColumnCount) {
         // Walked past the zombies' last line.
         finish('lost');
         return;
       }
-      var target = Sq.getLnC(cell.l, cell.c + 1);
-      if (!target || !target.isInLawn() || target.getAllPlants().length || zombieAt(cell.l, cell.c + 1)) return;
+      var target = Sq.getLnC(cell.l, next);
+      if (!target || !target.isInLawn() || target.getAllPlants().length || zombieAt(cell.l, next)) return;
       try {
         p.leapTo(target, 0.55, 70, false, true, 'quadInOut');
       } catch (e) {
@@ -385,8 +438,9 @@
     var Sq = G.Sq();
     var l = Sq.judgeLIndex(z.worldPositionY);
     var c = Sq.judgeCIndex(z.worldPositionX);
+    var face = z._xDir === 1 ? 1 : -1;
     for (var dc = 0; dc <= 1; dc++) {
-      var lnc = Sq.getLnC(l, c - dc);
+      var lnc = Sq.getLnC(l, c + face * dc);
       if (lnc && lnc.isInLawn && lnc.isInLawn() && lnc.getAllPlants().length) return true;
     }
     return false;
@@ -403,8 +457,16 @@
       var x = this.worldPositionX;
       // Zombies the player did not place (imps thrown by a gargantuar...)
       // hold where they are once on the lawn.
-      if (this._xHoldX == null && Sq.judgeCIndex(x) <= Sq.ColumnCount - 1) this._xHoldX = x;
+      var col = Sq.judgeCIndex(x);
+      if (this._xHoldX == null && col >= 0 && col <= Sq.ColumnCount - 1 && !this._xIncoming) this._xHoldX = x;
       if (this._xHoldX == null) return v;
+      if (this._xDir === 1) {
+        // Facing right (mirrored): stop at the square, at most one further.
+        var ceil = Math.min(Sq.getSquareWorldPosition(0, Sq.ColumnCount - 1).x, this._xHoldX + Sq.SquareWidth);
+        if (x >= ceil) return 0;
+        if (x >= this._xHoldX && !plantInFront(this)) return 0;
+        return v;
+      }
       var floor = Sq.getSquareWorldPosition(0, 0).x;
       var limit = Math.max(floor, this._xHoldX - Sq.SquareWidth);
       if (x <= limit) return 0;
@@ -443,6 +505,13 @@
     var origEnable = Z.prototype.characterOnEnable;
     Z.prototype.characterOnEnable = function () {
       this._xHoldX = null;
+      this._xIncoming = false;
+      if (this._xDir === 1) {
+        this._xDir = null;
+        try {
+          this.reversed = false;
+        } catch (e) {}
+      }
       return origEnable.apply(this, arguments);
     };
     Z.prototype._xHold = true;
@@ -471,7 +540,7 @@
     var r = run;
     var j = r.sel;
     if (j < 0 || !canUse(j)) return;
-    if (cell.c < 4) {
+    if (!placeable(cell.c)) {
       G.play('playCardChooseFailed');
       return;
     }
@@ -481,8 +550,20 @@
     r.sel = -1;
     var holdX = G.Sq().getSquareWorldPosition(cell.l, cell.c).x;
     G.play('playPlantOnFloor');
+    var mirror = r.mirror;
     G.spawnZombie(cell.l, d.type).then(function (z) {
-      if (z) z._xHoldX = holdX;
+      if (!z) return;
+      if (mirror) {
+        // Walk in from the left edge, facing right.
+        var Sq = G.Sq();
+        z._xIncoming = true;
+        z._xDir = 1;
+        z.worldPositionX = Sq.getSquareWorldPosition(cell.l, 0).x - Sq.SquareWidth;
+        try {
+          z.reversed = true;
+        } catch (e) {}
+      }
+      z._xHoldX = holdX;
     });
   }
 
@@ -581,13 +662,14 @@
       s.wave = r.wave;
       s.waveCount = r.diff.waves;
       s.score = pts;
-      s.mode = 'inverted';
+      s.mode = r.mirror ? 'mirror' : 'inverted';
     }
     X.play.finish(result, { noSummary: true });
-    X.store.set('invertedBest', Math.max(X.store.get('invertedBest', 0), pts));
+    var bestKey = r.mirror ? 'mirrorBest' : 'invertedBest';
+    X.store.set(bestKey, Math.max(X.store.get(bestKey, 0), pts));
     if (X.api.available() && X.api.loggedIn()) {
       X.api
-        .postScore('challenge:inverted', pts, { waves: r.wave, kills: r.killed, time: Math.round(r.time), stage: r.opts.stage })
+        .postScore(r.mirror ? 'challenge:mirror' : 'challenge:inverted', pts, { waves: r.wave, kills: r.killed, time: Math.round(r.time), stage: r.opts.stage })
         .then(function (res) {
           setTimeout(function () {
             if (res.rank && resultBox) resultBox.querySelector('.pvzx-inv-sub').textContent += ' · ' + t('summary_rank', { n: res.rank });
@@ -679,7 +761,8 @@
     var zone = hud.querySelector('.pvzx-inv-zone');
     if (grid && run.sel >= 0) {
       zone.style.display = 'block';
-      zone.style.left = (grid.x + grid.cw * 4) * rc.width + 'px';
+      zone.style.left = (grid.x + grid.cw * (run.mirror ? 0 : 4)) * rc.width + 'px';
+      zone.classList.toggle('pvzx-mirror', !!run.mirror);
       zone.style.top = grid.y * rc.height + 'px';
       zone.style.width = grid.cw * 5 * rc.width + 'px';
       zone.style.height = grid.ch * grid.rows * rc.height + 'px';
@@ -687,7 +770,7 @@
     var h = run.hover;
     if (grid && h && run.sel >= 0) {
       cellNode.style.display = 'block';
-      cellNode.classList.toggle('pvzx-bad', h.c < 4);
+      cellNode.classList.toggle('pvzx-bad', !placeable(h.c));
       cellNode.style.left = (grid.x + grid.cw * h.c) * rc.width + 'px';
       cellNode.style.top = (grid.y + grid.ch * h.l) * rc.height + 'px';
       cellNode.style.width = grid.cw * rc.width + 'px';
@@ -763,7 +846,7 @@
     return run;
   };
 
-  inv.best = function () {
-    return X.store.get('invertedBest', 0);
+  inv.best = function (mirror) {
+    return X.store.get(mirror ? 'mirrorBest' : 'invertedBest', 0);
   };
 })();

@@ -496,8 +496,8 @@ body.pvzx-open .mp-menu-account {
 .pvzx-inv-zone {
   position: absolute;
   display: none;
-  background: rgba(255, 155, 46, 0.12);
-  border-left: 3px dashed rgba(255, 155, 46, 0.8);
+  background: rgba(255, 155, 46, 0.18);
+  border-left: 4px dashed rgba(255, 120, 20, 0.95);
 }
 .pvzx-inv-cell {
   position: absolute;
@@ -576,4 +576,9 @@ body.pvzx-open .mp-menu-account {
   to {
     opacity: 0.35;
   }
+}
+
+.pvzx-inv-zone.pvzx-mirror {
+  border-left: none;
+  border-right: 4px dashed rgba(255, 120, 20, 0.95);
 }
