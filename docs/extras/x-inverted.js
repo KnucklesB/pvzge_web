@@ -222,7 +222,9 @@
   }
 
   // Zombie hold: walk in to the chosen square, then stand there unless a
-  // plant is right in front (then step in and eat it).
+  // plant is right in front (then step in and eat it). A zombie never goes
+  // more than one square past its square nor past the first column: in this
+  // mode the house is behind the zombies, and reaching it would end the game.
   function plantInFront(z) {
     var Sq = G.Sq();
     var l = Sq.judgeLIndex(z.worldPositionY);
@@ -240,9 +242,34 @@
     var orig = Z.prototype.walkSpeedScaleExtra;
     Z.prototype.walkSpeedScaleExtra = function () {
       var v = orig.apply(this, arguments);
-      if (this._xHoldX != null && this.worldPositionX <= this._xHoldX && !plantInFront(this)) return 0;
+      if (!inv.active() || this.hypnotized) return v;
+      var Sq = G.Sq();
+      var x = this.worldPositionX;
+      // Zombies the player did not place (imps thrown by a gargantuar...)
+      // hold where they are once on the lawn.
+      if (this._xHoldX == null && Sq.judgeCIndex(x) <= Sq.ColumnCount - 1) this._xHoldX = x;
+      if (this._xHoldX == null) return v;
+      var floor = Sq.getSquareWorldPosition(0, 0).x;
+      var limit = Math.max(floor, this._xHoldX - Sq.SquareWidth);
+      if (x <= limit) return 0;
+      if (x <= this._xHoldX && !plantInFront(this)) return 0;
       return v;
     };
+    // Safety net: "a zombie reached the house" never ends this mode.
+    var UIInGame = G.m.UI && G.m.UI.UIInGame;
+    if (UIInGame && !UIInGame.prototype._xInvLose) {
+      var origLose = UIInGame.prototype.loseDarken;
+      UIInGame.prototype.loseDarken = function (who) {
+        if (inv.active()) {
+          try {
+            if (who && who.worldPositionX != null) who._xHoldX = G.Sq().getSquareWorldPosition(0, 0).x;
+          } catch (e) {}
+          return;
+        }
+        return origLose.apply(this, arguments);
+      };
+      UIInGame.prototype._xInvLose = true;
+    }
     var origEnable = Z.prototype.characterOnEnable;
     Z.prototype.characterOnEnable = function () {
       this._xHoldX = null;
@@ -538,6 +565,11 @@
     });
     window.addEventListener('keydown', onKey, true);
     requestAnimationFrame(loop);
+  };
+
+  // For tests and debugging from the console.
+  inv.state = function () {
+    return run;
   };
 
   inv.best = function () {
