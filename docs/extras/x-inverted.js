@@ -18,9 +18,13 @@
  * in from the right and hop to the left, like zombies usually do, and the
  * zombies hold the left half, turned to face right (Zombie.reversed, the
  * game's own "walking backwards" zombies, teleported to the left edge).
- * Plants can't be turned around, so the plants of this variant are walls,
- * traps, close-combat plants and the ones that also shoot backwards (split
- * pea, starfruit).
+ * The game has no turned-around plants, so this file adds them
+ * (reversePlant): the sprite is mirrored, the shooter's detection rectangle
+ * (setDetecter) points to the left edge and the direction vector given to
+ * _shoot is flipped. It is applied to the plants verified to work that way
+ * (REVERSIBLE); lobbers and a few others hit zombies on either side by
+ * themselves. Walls, traps, close-combat plants and the plants that shoot
+ * both ways (split pea, starfruit) complete the mirrored waves.
  */
 (function () {
   'use strict';
@@ -52,17 +56,19 @@
     future: [['laser_bean', 'shoot', 0], ['starfruit', 'shoot', 1], ['holonut', 'wall', 2], ['homingthistle', 'shoot', 3], ['electricpeashooter', 'shoot', 4], ['citron', 'shoot', 5], ['coconutcannon', 'shoot', 7], ['infinut', 'wall', 6], ['megagatling', 'shoot', 10]],
     dark: [['puffshroom', 'shoot', 0], ['scaredyshroom', 'shoot', 0], ['fumeshroom', 'shoot', 1], ['magnetshroom', 'trap', 2], ['sporeshroom', 'shoot', 3], ['hypnoshroom', 'trap', 4], ['nightshade', 'shoot', 4], ['dusklobber', 'lob', 5], ['gloomshroom', 'melee', 6], ['grimrose', 'melee', 8]],
   };
-  // Mirrored variant: only plants that work facing away from the zombies.
-  // Roles: wall, melee (hits both sides or around), trap, back (shoots
-  // backwards too).
-  var MIRROR_BASE = [['wallnut', 'wall', 0], ['splitpea', 'back', 0], ['chilibean', 'trap', 0], ['bonkchoy', 'melee', 1], ['potatomine', 'trap', 1], ['starfruit', 'back', 2], ['tallnut', 'wall', 4]];
+  // Mirrored variant. Roles as above plus back (shoots both ways already).
+  var MIRROR_BASE = [['peashooter', 'shoot', 0], ['cabbagepult', 'lob', 0], ['wallnut', 'wall', 1], ['splitpea', 'back', 1], ['chilibean', 'trap', 1], ['bonkchoy', 'melee', 2], ['potatomine', 'trap', 2], ['starfruit', 'back', 3], ['tallnut', 'wall', 5]];
   var MIRROR_PLANTS = {
-    modern: [['garlic', 'trap', 2], ['squash', 'melee', 4]],
-    egypt: [['iceburg', 'trap', 1], ['garlic', 'trap', 3]],
-    west: [['chilibean', 'trap', 1], ['explodeonut', 'wall', 5]],
-    future: [['holonut', 'wall', 1], ['empea', 'trap', 3], ['pinkstarfruit', 'back', 4], ['magnetshroom', 'melee', 2]],
-    dark: [['magnetshroom', 'melee', 0], ['gloomshroom', 'melee', 2], ['hypnoshroom', 'trap', 3], ['garlic', 'trap', 4]],
+    modern: [['snowpea', 'shoot', 1], ['repeater', 'shoot', 2], ['kernelpult', 'lob', 2], ['garlic', 'trap', 3], ['squash', 'melee', 4], ['melonpult', 'lob', 6], ['gatling', 'shoot', 9]],
+    egypt: [['repeater', 'shoot', 1], ['iceburg', 'trap', 1], ['kernelpult', 'lob', 2], ['garlic', 'trap', 3], ['firepeashooter', 'shoot', 4], ['melonpult', 'lob', 7]],
+    west: [['kernelpult', 'lob', 1], ['lightningreed', 'shoot', 2], ['explodeonut', 'wall', 5], ['melonpult', 'lob', 4], ['wintermelon', 'lob', 8], ['primalpeashooter', 'shoot', 3]],
+    future: [['electricpeashooter', 'shoot', 1], ['holonut', 'wall', 1], ['homingthistle', 'shoot', 3], ['empea', 'trap', 3], ['magnetshroom', 'melee', 2], ['megagatling', 'shoot', 10]],
+    dark: [['magnetshroom', 'melee', 0], ['nightshade', 'shoot', 1], ['gloomshroom', 'melee', 2], ['hypnoshroom', 'trap', 3], ['garlic', 'trap', 4], ['firepeashooter', 'shoot', 5]],
   };
+  // Shooters that work turned around by reversePlant (checked in game).
+  var REVERSIBLE = { peashooter: 1, repeater: 1, snowpea: 1, gatling: 1, firepeashooter: 1, electricpeashooter: 1, primalpeashooter: 1, megagatling: 1, homingthistle: 1 };
+  // Already shoot both ways: keep their sprite as it is.
+  var KEEP_FACING = { splitpea: 1, starfruit: 1, pinkstarfruit: 1 };
   var SLOW = { wallnut: 1.4, tallnut: 1.7, holonut: 1.4, infinut: 1.4, pumpkin: 1.4 }; // walls walk slower
 
   // Wave formations, picked at random (weights), named on screen.
@@ -233,13 +239,7 @@
   // Plants of this arena available at this wave, optionally of some roles.
   function plantPool(wave, roles) {
     var source = run.mirror ? MIRROR_BASE.concat(MIRROR_PLANTS[run.opts.stage] || MIRROR_PLANTS.modern) : BASE.concat(ARENA_PLANTS[run.opts.stage] || ARENA_PLANTS.modern);
-    if (run.mirror && roles) {
-      // The regular formations ask for shooters / lobbers.
-      roles = roles.map(function (x) {
-        return x === 'shoot' || x === 'lob' ? 'back' : x;
-      });
-      if (roles.indexOf('back') >= 0 && roles.indexOf('melee') < 0) roles.push('melee');
-    }
+    if (run.mirror && roles && roles.indexOf('shoot') >= 0 && roles.indexOf('back') < 0) roles = roles.concat(['back']);
     var list = source.filter(function (p) {
       return p[2] <= wave && exists(p[0]) && (!roles || roles.indexOf(p[1]) >= 0);
     });
@@ -307,6 +307,55 @@
     return out;
   }
 
+  /* ------------------------------------------------- turned-around plants */
+
+  function reversePlant(p, logic) {
+    if (!p || !p.node || p._xRev) return;
+    p._xRev = true;
+    var sc = p.node.scale;
+    p.node.setScale(-Math.abs(sc.x), sc.y, sc.z);
+    if (!logic) return;
+    var CM = G.m.CharacterManager;
+    var Sq = G.Sq();
+    var proto = Object.getPrototypeOf(p);
+    if (typeof proto.setDetecter === 'function') {
+      // From the plant to the left edge instead of the right one.
+      p.setDetecter = function (t, lnc) {
+        lnc = lnc || this.plantInLnC;
+        if (!lnc || !lnc.node) return;
+        this.detector = CM.Rectangle.createRectangleNodeSide(lnc.node, -Sq.SquareWidth * (lnc.cIndex + 1), Sq.SquareHeight * (this.detectorHeight || 1));
+      };
+      try {
+        p.setDetecter(null, p.plantInLnC);
+      } catch (e) {}
+    }
+    if (typeof proto._shoot === 'function') {
+      // _shoot(..., direction = Vec2(1, 0), ...): fire the other way.
+      var shoot = proto._shoot;
+      p._shoot = function () {
+        var args = Array.prototype.slice.call(arguments);
+        var v = args[4] || new G.cc.Vec2(1, 0);
+        while (args.length < 4) args.push(undefined);
+        args[4] = new G.cc.Vec2(-v.x, v.y);
+        return shoot.apply(this, args);
+      };
+    }
+  }
+
+  // Pooled plants are reused by later levels: undo everything.
+  function unreversePlant(p) {
+    if (!p || !p._xRev) return;
+    p._xRev = false;
+    delete p.setDetecter;
+    delete p._shoot;
+    try {
+      var sc = p.node.scale;
+      p.node.setScale(Math.abs(sc.x), sc.y, sc.z);
+    } catch (e) {}
+  }
+  inv.reversePlant = reversePlant;
+  inv.unreversePlant = unreversePlant;
+
   function spawnPlant(item) {
     var r = run;
     var lnc = G.Sq().getLnC(item.l, item.c);
@@ -316,6 +365,7 @@
       .then(function () {
         var p = lnc.getAllPlants()[0];
         if (!p || !r.plants) return;
+        if (r.mirror && !KEEP_FACING[item.type]) reversePlant(p, !!REVERSIBLE[item.type]);
         if (item.elite) {
           // Elite: triple health and bigger.
           p.toughness = (p.toughness || 300) * 3;
@@ -829,8 +879,16 @@
       PP.deletePlant = function (p) {
         try {
           onPlantGone(p);
+          unreversePlant(p);
         } catch (e) {}
         return origDel.apply(this, arguments);
+      };
+      var origRegP = PP.registerPlant;
+      PP.registerPlant = function (p) {
+        try {
+          if (p && p._xRev) unreversePlant(p);
+        } catch (e) {}
+        return origRegP.apply(this, arguments);
       };
       PP._xInv = true;
     }
