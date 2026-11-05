@@ -27,6 +27,8 @@
  *   matches        multiplayer match history
  *   scores         leaderboards (daily challenge, solo survival…)
  *   achievements   unlocked achievements per account
+ *   branding_images  logos / images uploaded by admins (meta 'branding'
+ *                  holds which game image each one replaces)
  *
  * Users, sessions and recent matches are cached in memory (loaded at start);
  * every change is written through. Saves are always read from the database.
@@ -122,6 +124,13 @@ const SCHEMA = [
     achievement VARCHAR(48) NOT NULL,
     unlocked_at BIGINT NOT NULL,
     PRIMARY KEY (user_id, achievement)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS branding_images (
+    id CHAR(40) NOT NULL PRIMARY KEY,
+    mime VARCHAR(40) NOT NULL,
+    data LONGBLOB NOT NULL,
+    size INT NOT NULL,
+    created_at BIGINT NOT NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 ];
 
@@ -430,6 +439,31 @@ class MariaStore extends BaseStore {
 
   // Every write already keeps the previous version.
   async backupSave() {}
+
+  /* branding */
+
+  async getBranding() {
+    const rows = await this.pool.query("SELECT v FROM meta WHERE k = 'branding'");
+    return rows.length ? parseJson(rows[0].v, null) : null;
+  }
+
+  async setBranding(config) {
+    await this.pool.query("REPLACE INTO meta (k, v) VALUES ('branding', ?)", [JSON.stringify(config)]);
+  }
+
+  async putBrandingImage(id, mime, buf) {
+    await this.pool.query('INSERT IGNORE INTO branding_images (id, mime, data, size, created_at) VALUES (?, ?, ?, ?, ?)', [id, mime, buf, buf.length, Date.now()]);
+  }
+
+  async getBrandingImage(id) {
+    const rows = await this.pool.query('SELECT mime, data FROM branding_images WHERE id = ?', [id]);
+    return rows.length ? { mime: rows[0].mime, data: rows[0].data } : null;
+  }
+
+  async deleteBrandingImages(keep) {
+    const rows = await this.pool.query('SELECT id FROM branding_images');
+    for (const r of rows) if (!keep.has(r.id)) await this.pool.query('DELETE FROM branding_images WHERE id = ?', [r.id]);
+  }
 
   async saveHistory(userId) {
     const rows = await this.pool.query('SELECT id, updated_at, size, device, reason, archived_at FROM save_history WHERE user_id = ? ORDER BY id DESC', [userId]);

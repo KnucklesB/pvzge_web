@@ -582,3 +582,100 @@ body.pvzx-open .mp-menu-account {
   border-left: none;
   border-right: 4px dashed rgba(255, 120, 20, 0.95);
 }
+
+/* ------------------------------------------------------ branding editor */
+
+.pvzx-brand-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.4fr) 76px auto 76px minmax(150px, 1.6fr);
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.pvzx-brand-row > .pvzx-thumb:only-of-type {
+  grid-column: 2;
+}
+.pvzx-brand-name b {
+  display: block;
+  font-weight: normal;
+  font-size: 16px;
+  color: #fff;
+  text-shadow: var(--mp-outline);
+  word-break: break-all;
+}
+.pvzx-brand-name small {
+  display: block;
+  font-size: 12px;
+  color: #e8cfa3;
+  text-shadow: var(--mp-outline);
+  word-break: break-all;
+}
+.pvzx-thumb {
+  width: 76px;
+  height: 56px;
+  border-radius: 8px;
+  background: repeating-conic-gradient(#5a3a22 0 25%, #4a2c1b 0 50%) 0 0 / 14px 14px;
+  border: 2px solid #2b1608;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: #e8cfa3;
+}
+.pvzx-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.pvzx-arrow {
+  color: var(--mp-gold);
+  font-size: 20px;
+  text-shadow: var(--mp-outline);
+}
+.pvzx-brand-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.pvzx-brand-list {
+  margin-top: 8px;
+}
+.pvzx-slider {
+  display: grid;
+  grid-template-columns: 110px 1fr 50px;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  font-size: 15px;
+  color: #ffe9b8;
+  text-shadow: var(--mp-outline);
+}
+.pvzx-slider input {
+  width: 100%;
+  accent-color: #5fd12e;
+}
+.pvzx-brand-save {
+  position: sticky;
+  bottom: 0;
+  justify-content: center;
+  padding: 10px 0 2px;
+  background: linear-gradient(transparent, #a8703f 40%);
+}
+.pvzx-code {
+  white-space: pre-wrap;
+  font-size: 13px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 10px;
+  padding: 10px;
+  color: #fff;
+  user-select: text;
+}
+@media (max-width: 640px) {
+  .pvzx-brand-row {
+    grid-template-columns: 1fr 76px auto 76px;
+  }
+  .pvzx-brand-btns {
+    grid-column: 1 / -1;
+  }
+}
