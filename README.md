@@ -106,7 +106,7 @@ Click **Extras** on the main menu for single-player additions (they never modify
 | **Mutators** | Apply to any single-player level: tough zombies (double health), double horde, scarce sun, no mowers, rushed waves, slow recharge, no plant food, fog and hasty zombies. |
 | **Achievements** | 21 achievements (no mowers, minimalist, untouchable, speedrun, 1,000 zombies, endless waves, daily streak...), kept in the browser and merged with the account when logged in. |
 | **Leaderboard** | Today's challenge and Endless Survival (needs the multiplayer server and an account). |
-| **Cloud** | The profiles in your cloud save and its earlier versions, restorable in one click. |
+| **Cloud** | **Import save (.json)** to restore a save file (the game's export, a cloud save or the raw localStorage value; it replaces this browser's progress and, when logged in, is uploaded with the previous save kept in the history; with a server only `ADMIN_USERS`, or everyone with `SAVE_IMPORT=all`), **Export save (.json)**, the profiles in your cloud save and its earlier versions, restorable in one click. |
 
 The code lives in [`docs/extras`](docs/extras) (`x-play.js`: speed, auto-collect, health bars, statistics, preview and summary; `x-modes.js`: modes and mutators; `x-achievements.js`; `x-ui.js`: window and menu button).
 

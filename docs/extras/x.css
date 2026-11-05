@@ -451,3 +451,10 @@ body.pvzx-open .mp-menu-account {
     font-size: 32px;
   }
 }
+
+.pvzx-file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
