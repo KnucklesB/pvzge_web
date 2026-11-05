@@ -31,12 +31,30 @@
     hard: { waves: 16, every: 20, step: 5.5, count: function (w) { return 3 + w; }, brains: 175, income: 5.5 },
   };
 
-  // Plants that join the attack, by first wave (index) they can appear in.
-  var PLANTS = [
-    ['peashooter', 0], ['cabbagepult', 0], ['wallnut', 1], ['snowpea', 2], ['kernelpult', 2], ['bonkchoy', 3],
-    ['repeater', 4], ['chomper', 5], ['tallnut', 6], ['threepeater', 7], ['melonpult', 8], ['gatlingpea', 10],
+  // Plants that join the attack in each arena: [codename, role, first wave
+  // (index)]. Roles: shoot (straight shots), lob (over obstacles), wall,
+  // melee (hits what is right in front), trap (hurts zombies that eat or step
+  // on it). Every arena mixes its own world's plants with a few classics;
+  // plants missing from the running game version are skipped.
+  var BASE = [['peashooter', 'shoot', 0], ['cabbagepult', 'lob', 0], ['wallnut', 'wall', 1]];
+  var ARENA_PLANTS = {
+    modern: [['snowpea', 'shoot', 1], ['repeater', 'shoot', 2], ['kernelpult', 'lob', 2], ['bonkchoy', 'melee', 3], ['chomper', 'melee', 4], ['threepeater', 'shoot', 5], ['tallnut', 'wall', 5], ['melonpult', 'lob', 6], ['spikeweed', 'trap', 3], ['gatling', 'shoot', 9]],
+    egypt: [['bloomerang', 'shoot', 0], ['bonkchoy', 'melee', 1], ['repeater', 'shoot', 2], ['kernelpult', 'lob', 2], ['iceburg', 'trap', 3], ['snapdragon', 'melee', 4], ['threepeater', 'shoot', 6], ['tallnut', 'wall', 6], ['melonpult', 'lob', 8]],
+    west: [['peapod', 'shoot', 0], ['splitpea', 'shoot', 1], ['lightningreed', 'shoot', 2], ['chilibean', 'trap', 2], ['cactus', 'shoot', 3], ['spikeweed', 'trap', 3], ['melonpult', 'lob', 4], ['tallnut', 'wall', 4], ['wintermelon', 'lob', 8], ['spikerock', 'trap', 7]],
+    future: [['laser_bean', 'shoot', 0], ['starfruit', 'shoot', 1], ['holonut', 'wall', 2], ['homingthistle', 'shoot', 3], ['electricpeashooter', 'shoot', 4], ['citron', 'shoot', 5], ['coconutcannon', 'shoot', 7], ['infinut', 'wall', 6], ['megagatling', 'shoot', 10]],
+    dark: [['puffshroom', 'shoot', 0], ['scaredyshroom', 'shoot', 0], ['fumeshroom', 'shoot', 1], ['magnetshroom', 'trap', 2], ['sporeshroom', 'shoot', 3], ['hypnoshroom', 'trap', 4], ['nightshade', 'shoot', 4], ['dusklobber', 'lob', 5], ['gloomshroom', 'melee', 6], ['grimrose', 'melee', 8]],
+  };
+  var SLOW = { wallnut: 1.4, tallnut: 1.7, holonut: 1.4, infinut: 1.4, pumpkin: 1.4 }; // walls walk slower
+
+  // Wave formations, picked at random (weights), named on screen.
+  var FORMATIONS = [
+    { id: 'advance', weight: 4, from: 0 },
+    { id: 'wall', weight: 2, from: 2 },
+    { id: 'rush', weight: 2, from: 1 },
+    { id: 'artillery', weight: 2, from: 2 },
+    { id: 'focus', weight: 2, from: 3 },
+    { id: 'elite', weight: 1, from: 4 },
   ];
-  var SLOW = { wallnut: 1.4, tallnut: 1.7 }; // walls walk slower
 
   inv.options = X.store.get('inverted', { stage: 'modern', difficulty: 'normal' });
 
@@ -157,42 +175,179 @@
     });
   }
 
-  function pickPlant(wave) {
-    var pool = PLANTS.filter(function (p) {
-      return p[1] <= wave;
-    }).map(function (p) {
+  var available = null;
+  function exists(code) {
+    if (!available) {
+      available = {};
+      MP.allPlants().forEach(function (c) {
+        available[c] = true;
+      });
+    }
+    return !!available[code];
+  }
+
+  function rnd(arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  // Plants of this arena available at this wave, optionally of some roles.
+  function plantPool(wave, roles) {
+    var list = BASE.concat(ARENA_PLANTS[run.opts.stage] || ARENA_PLANTS.modern).filter(function (p) {
+      return p[2] <= wave && exists(p[0]) && (!roles || roles.indexOf(p[1]) >= 0);
+    });
+    if (!list.length && roles) return plantPool(wave, null);
+    return list.map(function (p) {
       return p[0];
     });
-    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  function pickFormation(wave) {
+    var list = FORMATIONS.filter(function (f) {
+      return f.from <= wave;
+    });
+    var total = list.reduce(function (a, f) {
+      return a + f.weight;
+    }, 0);
+    var x = Math.random() * total;
+    for (var i = 0; i < list.length; i++) {
+      x -= list[i].weight;
+      if (x <= 0) return list[i].id;
+    }
+    return 'advance';
+  }
+
+  // One plant to place: {l, c, type, step multiplier, energized, elite}.
+  function plan(wave, kind, n) {
+    var lanes = [0, 1, 2, 3, 4].sort(function () {
+      return Math.random() - 0.5;
+    });
+    var out = [];
+    var energizeChance = Math.min(0.4, 0.08 + wave * 0.025);
+    var add = function (l, c, type, extra) {
+      out.push(Object.assign({ l: l, c: c, type: type, mul: Math.random() < 0.15 ? 0.6 : 1, energized: Math.random() < energizeChance, elite: false }, extra || {}));
+    };
+    var i;
+    if (kind === 'wall') {
+      // Walls in front, shooters right behind, all walking together.
+      var walls = plantPool(wave, ['wall']);
+      var back = plantPool(wave, ['shoot', 'lob']);
+      var k = Math.min(5, Math.max(2, Math.ceil(n / 2)));
+      for (i = 0; i < k; i++) {
+        add(lanes[i], 1, rnd(walls), { mul: 1.3 });
+        add(lanes[i], 0, rnd(back), { mul: 1.3 });
+      }
+    } else if (kind === 'rush') {
+      // Many cheap plants, walking fast.
+      var cheap = plantPool(wave, ['shoot', 'melee', 'trap']);
+      for (i = 0; i < Math.min(10, n + 2); i++) add(lanes[i % 5], i < 5 ? 0 : 1, rnd(cheap), { mul: 0.55, energized: false });
+    } else if (kind === 'artillery') {
+      var lob = plantPool(wave, ['lob']);
+      for (i = 0; i < Math.min(10, n); i++) add(lanes[i % 5], i < 5 ? 0 : 1, rnd(lob));
+    } else if (kind === 'focus') {
+      // Everything on one or two lanes, led by an elite plant.
+      var few = lanes.slice(0, n > 4 ? 2 : 1);
+      var all = plantPool(wave, null);
+      for (i = 0; i < Math.min(few.length * 2, n); i++) add(few[i % few.length], Math.floor(i / few.length), rnd(all), i === 0 ? { elite: true, energized: true } : null);
+    } else if (kind === 'elite') {
+      // Few, but tough and energized.
+      var strong = plantPool(wave, ['shoot', 'lob', 'melee']);
+      for (i = 0; i < Math.max(1, Math.ceil(n / 3)); i++) add(lanes[i], 0, rnd(strong), { elite: true, energized: true, mul: 1.2 });
+    } else {
+      var mix = plantPool(wave, null);
+      for (i = 0; i < Math.min(10, n); i++) add(lanes[i % 5], i < 5 ? 0 : 1, rnd(mix));
+    }
+    return out;
+  }
+
+  function spawnPlant(item) {
+    var r = run;
+    var lnc = G.Sq().getLnC(item.l, item.c);
+    if (!lnc || lnc.getAllPlants().length) return;
+    r.spawned++;
+    Promise.resolve(lnc.SpawnPlantByType(item.type))
+      .then(function () {
+        var p = lnc.getAllPlants()[0];
+        if (!p || !r.plants) return;
+        if (item.elite) {
+          // Elite: triple health and bigger.
+          p.toughness = (p.toughness || 300) * 3;
+          p.health = p.toughness;
+          try {
+            p.node.setScale(p.node.scale.x * 1.3, p.node.scale.y * 1.3, 1);
+          } catch (e) {}
+        }
+        r.plants.set(p, {
+          type: item.type,
+          mul: item.mul,
+          energized: item.energized,
+          elite: item.elite,
+          fed: false,
+          next: r.diff.step * (SLOW[item.type] || 1) * item.mul * (0.7 + Math.random() * 0.6),
+        });
+      })
+      .catch(function (e) {
+        MP.warn('inverted: plant spawn failed', item.type, e);
+      });
   }
 
   function spawnWave() {
     var r = run;
     r.wave++;
-    var n = r.diff.count(r.wave - 1);
-    var Sq = G.Sq();
-    var lanes = [0, 1, 2, 3, 4].sort(function () {
-      return Math.random() - 0.5;
-    });
-    for (var i = 0; i < n; i++) {
-      var l = lanes[i % 5];
-      var col = i < 5 ? 0 : 1;
-      var lnc = Sq.getLnC(l, col);
-      if (!lnc || lnc.getAllPlants().length) continue;
-      var type = pickPlant(r.wave - 1);
-      r.spawned++;
-      (function (lnc, type) {
-        Promise.resolve(lnc.SpawnPlantByType(type))
-          .then(function () {
-            var p = lnc.getAllPlants()[0];
-            if (p && r.plants) r.plants.set(p, { next: r.diff.step * (SLOW[type] || 1) * (0.7 + Math.random() * 0.6), type: type });
-          })
-          .catch(function (e) {
-            MP.warn('inverted: plant spawn failed', type, e);
-          });
-      })(lnc, type);
-    }
+    var w = r.wave - 1;
+    var huge = r.wave % 5 === 0 || r.wave === r.diff.waves;
+    var n = r.diff.count(w);
+    var kind = huge ? 'advance' : pickFormation(w);
+    var items = plan(w, kind, huge ? Math.round(n * 1.6) : n);
+    if (huge && items.length) Object.assign(items[0], { elite: true, energized: true });
+    items.forEach(spawnPlant);
+    r.formation = huge ? 'huge' : kind;
+    announce(t(huge ? 'inv_f_huge' : 'inv_f_' + kind));
     G.play('playHugeWave');
+    // Special event: a jalapeno sweeps the most defended lane.
+    var chance = { easy: 0, normal: 0.18, hard: 0.3 }[r.opts.difficulty] || 0;
+    if (r.wave >= 3 && Math.random() < chance && exists('jalapeno')) jalapenoEvent();
+  }
+
+  function jalapenoEvent() {
+    var r = run;
+    var Sq = G.Sq();
+    var count = [0, 0, 0, 0, 0];
+    zombies().forEach(function (z) {
+      var l = Sq.judgeLIndex(z.worldPositionY);
+      if (l >= 0 && l < 5) count[l]++;
+    });
+    var lane = count.indexOf(Math.max.apply(null, count));
+    if (count[lane] === 0) return;
+    r.warnLane = { l: lane, until: r.time + 3 };
+    announce(t('inv_jalapeno', { n: lane + 1 }));
+    setTimeout(function () {
+      if (!run || run !== r || r.over) return;
+      // First free square from the left (the jalapeno burns the whole lane).
+      for (var c = 0; c < Sq.ColumnCount; c++) {
+        var lnc = Sq.getLnC(lane, c);
+        if (lnc && !lnc.getAllPlants().length && !zombieAt(lane, c)) {
+          Promise.resolve(lnc.SpawnPlantByType('jalapeno')).catch(function () {});
+          break;
+        }
+      }
+      r.warnLane = null;
+    }, 3000 / Math.max(0.5, G.cc.director.gameSpeed || 1));
+  }
+
+  // Energized plants use their plant food once, when a zombie gets close.
+  function feedIfClose(p, st, cell) {
+    if (!st.energized || st.fed || p.leapTween) return;
+    var Sq = G.Sq();
+    var near = zombies().some(function (z) {
+      if (Sq.judgeLIndex(z.worldPositionY) !== cell.l) return false;
+      var c = Sq.judgeCIndex(z.worldPositionX);
+      return c > cell.c && c <= cell.c + 2;
+    });
+    if (!near) return;
+    st.fed = true;
+    try {
+      p.food(true);
+    } catch (e) {}
   }
 
   function advance(dt) {
@@ -201,11 +356,12 @@
     plants().forEach(function (p) {
       var st = r.plants && r.plants.get(p);
       if (!st) return;
-      st.next -= dt;
-      if (st.next > 0 || p.leapTween) return;
-      st.next = r.diff.step * (SLOW[st.type] || 1) * (0.8 + Math.random() * 0.4);
       var cell = cellOf(p);
       if (!cell) return;
+      feedIfClose(p, st, cell);
+      st.next -= dt;
+      if (st.next > 0 || p.leapTween || p.fooding) return;
+      st.next = r.diff.step * (SLOW[st.type] || 1) * st.mul * (0.8 + Math.random() * 0.4);
       if (cell.c >= Sq.ColumnCount - 1) {
         // Walked past the zombies' last line.
         finish('lost');
@@ -255,6 +411,20 @@
       if (x <= this._xHoldX && !plantInFront(this)) return 0;
       return v;
     };
+    // Plants teach the player how to use them when they appear ("Spikeweeds
+    // destroy..."): meaningless here, the player does not plant.
+    var KL = G.KL && G.KL();
+    if (KL && !KL._xInvTips) {
+      ['gameTip', 'gameTipString'].forEach(function (name) {
+        var orig = KL[name];
+        if (typeof orig !== 'function') return;
+        KL[name] = function () {
+          if (inv.active()) return;
+          return orig.apply(this, arguments);
+        };
+      });
+      KL._xInvTips = true;
+    }
     // Safety net: "a zombie reached the house" never ends this mode.
     var UIInGame = G.m.UI && G.m.UI.UIInGame;
     if (UIInGame && !UIInGame.prototype._xInvLose) {
@@ -345,12 +515,17 @@
 
   /* ----------------------------------------------------------- frame */
 
+  function announce(text) {
+    if (run) run.banner = { text: text, until: performance.now() + 2600 };
+  }
+
   function onPlantGone(p) {
     if (!inv.active() || !run.started || run.over) return;
-    if (run.plants && run.plants.get(p) && !(p.health > 0)) {
+    var st = run.plants && run.plants.get(p);
+    if (st && !(p.health > 0)) {
       run.plants.delete(p);
       run.killed++;
-      run.brains += 25 + run.wave * 2;
+      run.brains += (25 + run.wave * 2) * (st.elite ? 3 : 1);
     }
   }
 
@@ -466,6 +641,8 @@
       hud = el('div#pvzx-inv-hud', null, [
         el('div.pvzx-inv-brains', null, [el('span.pvzx-inv-brain'), el('b')]),
         el('div.pvzx-inv-wave'),
+        el('div.pvzx-inv-banner'),
+        el('div.pvzx-inv-warn'),
         el('div.pvzx-inv-cell'),
         el('div.pvzx-inv-zone'),
       ]);
@@ -482,7 +659,21 @@
     st.height = rc.height + 'px';
     st.setProperty('--x-s', String(scale));
     hud.querySelector('.pvzx-inv-brains b').textContent = String(Math.floor(run.brains));
-    hud.querySelector('.pvzx-inv-wave').textContent = t('inv_wave', { n: run.wave, total: run.diff.waves }) + ' · ' + t('inv_killed', { n: run.killed });
+    hud.querySelector('.pvzx-inv-wave').textContent =
+      t('inv_wave', { n: run.wave, total: run.diff.waves }) + (run.formation ? ' · ' + t(run.formation === 'huge' ? 'inv_f_huge' : 'inv_f_' + run.formation) : '') + ' · ' + t('inv_killed', { n: run.killed });
+    var banner = hud.querySelector('.pvzx-inv-banner');
+    var shown = run.banner && performance.now() < run.banner.until;
+    banner.style.display = shown ? 'block' : 'none';
+    if (shown && banner.textContent !== run.banner.text) banner.textContent = run.banner.text;
+    var warn = hud.querySelector('.pvzx-inv-warn');
+    var gridW = G.gridNorm();
+    if (gridW && run.warnLane) {
+      warn.style.display = 'block';
+      warn.style.left = gridW.x * rc.width + 'px';
+      warn.style.top = (gridW.y + gridW.ch * run.warnLane.l) * rc.height + 'px';
+      warn.style.width = gridW.cw * gridW.cols * rc.width + 'px';
+      warn.style.height = gridW.ch * rc.height + 'px';
+    } else warn.style.display = 'none';
     var grid = G.gridNorm();
     var cellNode = hud.querySelector('.pvzx-inv-cell');
     var zone = hud.querySelector('.pvzx-inv-zone');

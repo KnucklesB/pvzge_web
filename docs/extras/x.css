@@ -549,3 +549,31 @@ body.pvzx-open .mp-menu-account {
 #pvzx-inv-result .pvzx-file-actions {
   justify-content: center;
 }
+
+.pvzx-inv-banner {
+  position: absolute;
+  left: 50%;
+  top: 22%;
+  transform: translateX(-50%);
+  display: none;
+  padding: 0.25em 0.9em;
+  border-radius: 0.6em;
+  background: rgba(30, 12, 4, 0.7);
+  font-size: calc(40px * var(--x-s, 1));
+  color: var(--mp-gold);
+  white-space: nowrap;
+  animation: pvzx-drop 0.35s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.pvzx-inv-warn {
+  position: absolute;
+  display: none;
+  background: rgba(255, 70, 20, 0.28);
+  border: 3px solid rgba(255, 90, 30, 0.9);
+  border-radius: 8px;
+  animation: pvzx-blink 0.5s infinite alternate;
+}
+@keyframes pvzx-blink {
+  to {
+    opacity: 0.35;
+  }
+}
