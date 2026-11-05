@@ -559,8 +559,9 @@ app.post('/api/scores/:board', limit('scores', 20), requireUser, json, (req, res
 // Branding (logos and game images replaced by admins) -----------------------
 //
 // config: { version, title, icon, menuLogo: {img, x, y, scale}, frames:
-// {"<sprite frame name>": "<image id>"} } - image ids are content hashes, so
-// images are immutable and cached for good.
+// {"<sprite frame name>": "<image id>"}, faces: {"<world>": {head, jaw,
+// hideJaw}} } - image ids are content hashes, so images are immutable and
+// cached for good.
 
 const BRAND_MIME = { 'image/png': 1, 'image/jpeg': 1, 'image/webp': 1, 'image/gif': 1 };
 const BRAND_ID = /^[a-f0-9]{40}$/;
@@ -572,6 +573,10 @@ function brandingIds(cfg) {
   if (cfg.icon) ids.add(cfg.icon);
   if (cfg.menuLogo && cfg.menuLogo.img) ids.add(cfg.menuLogo.img);
   Object.values(cfg.frames || {}).forEach((id) => ids.add(id));
+  Object.values(cfg.faces || {}).forEach((f) => {
+    if (f.head) ids.add(f.head);
+    if (f.jaw) ids.add(f.jaw);
+  });
   return ids;
 }
 
@@ -614,8 +619,18 @@ app.put('/api/admin/branding', limit('admin', 60), requireAdmin, json, wrap(asyn
       const id = okId(b.frames[name]);
       if (n && id) frames[n] = id;
     });
+  // Zombie faces per world: {world: {head, jaw, hideJaw}}.
+  const faces = {};
+  Object.keys(b.faces || {})
+    .slice(0, 40)
+    .forEach((w) => {
+      const f = b.faces[w] || {};
+      if (!/^[a-z]{2,16}$/.test(w) || !okId(f.head)) return;
+      faces[w] = { head: okId(f.head), jaw: okId(f.jaw), hideJaw: !!f.hideJaw && !okId(f.jaw) };
+    });
   const cfg = {
     version: Date.now(),
+    faces,
     title: clean(b.title, 80),
     icon: okId(b.icon),
     menuLogo: b.menuLogo && okId(b.menuLogo.img) ? { img: okId(b.menuLogo.img), x: num(b.menuLogo.x, -1, 1, 0), y: num(b.menuLogo.y, -1, 1, 0.22), scale: num(b.menuLogo.scale, 0.05, 2, 0.55) } : null,

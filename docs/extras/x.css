@@ -679,3 +679,25 @@ body.pvzx-open .mp-menu-account {
     grid-column: 1 / -1;
   }
 }
+
+.pvzx-face {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 6px;
+}
+.pvzx-face .pvzx-brand-row {
+  border-bottom: none;
+}
+.pvzx-face-jaw {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -2px 0 4px;
+  font-size: 14px;
+  color: #ffe9b8;
+  text-shadow: var(--mp-outline);
+}
+.pvzx-face-jaw .mp-seg button {
+  height: 28px;
+  font-size: 14px;
+  padding: 0 8px 2px;
+}

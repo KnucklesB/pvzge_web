@@ -16,6 +16,13 @@
  * engine's global `cc` exists before the loading screen), so the loading
  * screen is covered too. The menu logo is an extra sprite drawn over the
  * menu background, where the game's logo is painted.
+ *
+ * "faces" replaces the zombies' faces of a world: {"egypt": {"head": url,
+ * "jaw": url | null, "hideJaw": bool}}. Zombies are DragonBones armatures
+ * and every world has its own texture atlas, found through the world's basic
+ * zombie prefab; the "head" (and "head_jaw") regions of that atlas are
+ * painted over and the atlas texture gets the new image, so every zombie of
+ * the world sharing it (basic, cone, bucket, flag...) shows the new face.
  */
 (function () {
   'use strict';
@@ -29,6 +36,23 @@
     ['menu_bg', ['SPL9', 'SPL10']],
     ['loading_bg', ['splash']],
     ['loading_logo', ['logoGardendless']],
+  ];
+
+  // Worlds whose zombie faces can be replaced: [key, basic zombie prefab].
+  B.WORLDS = [
+    ['frontyard', 'zombies/BasicZOMBIE'],
+    ['egypt', 'zombies/EgyptBasicZOMBIE'],
+    ['pirate', 'zombies/PirateBasicZOMBIE'],
+    ['cowboy', 'zombies/CowboyBasicZOMBIE'],
+    ['kongfu', 'zombies/KongfuBasicZOMBIE'],
+    ['future', 'zombies/FutureBasicZOMBIE'],
+    ['dark', 'zombies/DarkBasicZOMBIE'],
+    ['beach', 'zombies/BeachBasicZOMBIE'],
+    ['iceage', 'zombies/IceageBasicZOMBIE'],
+    ['lostcity', 'zombies/LostcityBasicZOMBIE'],
+    ['eighties', 'zombies/EightiesBasicZOMBIE'],
+    ['dino', 'zombies/DinoBasicZOMBIE'],
+    ['sky', 'zombies/SkyBasicZOMBIE'],
   ];
 
   B.config = null; // normalized: {title, icon, menuLogo:{url,x,y,scale}, frames:{name:url}}
@@ -77,8 +101,18 @@
       icon: raw.icon ? serverUrl(raw.icon) : '',
       menuLogo: raw.menuLogo && raw.menuLogo.img ? { url: serverUrl(raw.menuLogo.img), x: raw.menuLogo.x, y: raw.menuLogo.y, scale: raw.menuLogo.scale } : null,
       frames: frames,
+      faces: facesFrom(raw.faces, serverUrl),
     };
   };
+
+  function facesFrom(faces, toUrl) {
+    var out = {};
+    Object.keys(faces || {}).forEach(function (w) {
+      var f = faces[w];
+      if (f && f.head) out[w] = { head: toUrl(f.head), jaw: f.jaw ? toUrl(f.jaw) : null, hideJaw: !!f.hideJaw };
+    });
+    return out;
+  }
 
   function fetchConfig() {
     var api = MP.api;
@@ -99,7 +133,15 @@
       })
       .then(function (c) {
         if (!c) return null;
-        return { title: c.title || '', icon: c.icon || '', menuLogo: c.menuLogo && c.menuLogo.url ? c.menuLogo : null, frames: c.frames || {} };
+        return {
+          title: c.title || '',
+          icon: c.icon || '',
+          menuLogo: c.menuLogo && c.menuLogo.url ? c.menuLogo : null,
+          frames: c.frames || {},
+          faces: facesFrom(c.faces, function (u) {
+            return u;
+          }),
+        };
       })
       .catch(function () {
         return null;
@@ -267,6 +309,156 @@
     });
   }
 
+  /* ---------------------------------------------------- zombie faces */
+
+  var worldAtlas = {}; // world -> Promise<{atlas, head, jaw}>
+
+  function subTexture(atlas, name) {
+    try {
+      return JSON.parse(atlas.atlasJson).SubTexture.find(function (s) {
+        return s.name === name;
+      });
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // The world's zombie atlas, from its basic zombie prefab.
+  B.worldAtlas = function (world) {
+    var cached = worldAtlas[world];
+    if (cached && cached.atlas && cached.atlas.isValid) return Promise.resolve(cached);
+    var row = B.WORLDS.find(function (w) {
+      return w[0] === world;
+    });
+    var cc = MP.game && MP.game.cc;
+    if (!row || !cc || !cc.resources || !cc.dragonBones) return Promise.reject(new Error('not_ready'));
+    return new Promise(function (resolve, reject) {
+      cc.resources.load(row[1], cc.Prefab, function (err, prefab) {
+        if (err || !prefab) return reject(err || new Error('no_prefab'));
+        var found = null;
+        prefab.data.getComponentsInChildren(cc.dragonBones.ArmatureDisplay).some(function (d) {
+          var at = d.dragonAtlasAsset;
+          var head = at && subTexture(at, 'head');
+          if (head) found = { atlas: at, head: head, jaw: subTexture(at, 'head_jaw') };
+          return !!found;
+        });
+        if (!found) return reject(new Error('no_head'));
+        worldAtlas[world] = found;
+        resolve(found);
+      });
+    });
+  };
+
+  // The game's PNG of an atlas (remembered once found).
+  function atlasSource(atlas) {
+    if (!atlas._xFaceSrc) {
+      var ia = atlas.texture && atlas.texture.image;
+      var url = ia && ia.nativeUrl;
+      atlas._xFaceSrc = url ? url.replace(/\.(astc|pkm|pvr)$/, '.png') : null;
+    }
+    return atlas._xFaceSrc;
+  }
+
+  // Draws an image into an atlas region (rotated regions are stored turned).
+  function drawRegion(ctx, img, r) {
+    var w = r.rotated ? r.height : r.width;
+    var h = r.rotated ? r.width : r.height;
+    ctx.clearRect(r.x, r.y, w, h);
+    if (!img) return;
+    if (r.rotated) {
+      ctx.save();
+      ctx.translate(r.x, r.y + h);
+      ctx.rotate(-Math.PI / 2);
+      ctx.drawImage(img, 0, 0, r.width, r.height);
+      ctx.restore();
+    } else ctx.drawImage(img, r.x, r.y, w, h);
+  }
+
+  // The original face of a world, for the editor (thumbnail / download).
+  B.originalFace = function (world, part) {
+    return B.worldAtlas(world).then(function (wa) {
+      var r = part === 'jaw' ? wa.jaw : wa.head;
+      if (!r) throw new Error('no_region');
+      return loadImage(atlasSource(wa.atlas)).then(function (img) {
+        var c = document.createElement('canvas');
+        c.width = r.width;
+        c.height = r.height;
+        var ctx = c.getContext('2d');
+        if (r.rotated) {
+          ctx.translate(0, r.height);
+          ctx.rotate(-Math.PI / 2);
+          ctx.drawImage(img, r.x, r.y, r.height, r.width, 0, 0, r.height, r.width);
+        } else ctx.drawImage(img, r.x, r.y, r.width, r.height, 0, 0, r.width, r.height);
+        return c;
+      });
+    });
+  };
+
+  function applyFace(world, face) {
+    return B.worldAtlas(world).then(function (wa) {
+      var atlas = wa.atlas;
+      var sig = face ? JSON.stringify(face) : '';
+      var tex = atlas.texture;
+      if (!tex) return;
+      if (!face) {
+        // Removed: back to the game's image. The engine drops an image's
+        // pixels once uploaded, so redraw it from the game's PNG.
+        if (!atlas._xFaceSig) return;
+        return loadImage(atlasSource(atlas)).then(function (img) {
+          tex.uploadData(img);
+          atlas._xFaceSig = '';
+          atlas._xFaceGfx = null;
+        });
+      }
+      // Already painted (the engine recreates the GPU texture if it reloads it).
+      if (atlas._xFaceSig === sig && tex._gfxTexture === atlas._xFaceGfx) return;
+      var src = atlasSource(atlas);
+      return Promise.all([loadImage(src), loadImage(face.head), face.jaw ? loadImage(face.jaw) : null]).then(function (imgs) {
+        var c = document.createElement('canvas');
+        c.width = imgs[0].width;
+        c.height = imgs[0].height;
+        var ctx = c.getContext('2d');
+        ctx.drawImage(imgs[0], 0, 0);
+        drawRegion(ctx, imgs[1], wa.head);
+        if (wa.jaw && (face.jaw || face.hideJaw)) drawRegion(ctx, imgs[2] || null, wa.jaw);
+        // Write the pixels into the existing GPU texture: replacing the
+        // texture's image instead leaves armatures already drawn with it
+        // invisible.
+        tex.uploadData(c);
+        atlas._xFaceGfx = tex._gfxTexture;
+        atlas._xFaceSig = sig;
+      });
+    });
+  }
+
+  var facesBusy = false;
+  var facesApplied = {}; // worlds changed in this page (to restore when removed)
+  function applyFaces() {
+    if (facesBusy || !(MP.game && MP.game.ready)) return;
+    var faces = (B.config && B.config.faces) || {};
+    var worlds = Object.keys(faces).concat(Object.keys(facesApplied));
+    if (!worlds.length) return;
+    facesBusy = true;
+    Promise.all(
+      worlds
+        .filter(function (w, i) {
+          return worlds.indexOf(w) === i;
+        })
+        .map(function (w) {
+          return applyFace(w, faces[w] || null)
+            .then(function () {
+              if (faces[w]) facesApplied[w] = true;
+              else delete facesApplied[w];
+            })
+            .catch(function (e) {
+              MP.warn('branding: zombie face', w, e);
+            });
+        }),
+    ).then(function () {
+      facesBusy = false;
+    });
+  }
+
   /* ----------------------------------------------------------- apply */
 
   // Applies a configuration now (also used for the editor's live preview).
@@ -276,6 +468,7 @@
     if (window.cc && cc.director && cc.director.getScene()) {
       scanFrames();
       placeLogo();
+      applyFaces();
     }
     B.emit('change', B.config);
   };
@@ -290,13 +483,20 @@
     hooked = true;
     var n = 0;
     cc.director.on(cc.Director.EVENT_AFTER_UPDATE, function () {
-      if (!B.config || !Object.keys(B.config.frames || {}).length) return;
+      if (!B.config) return;
+      // The engine may release and reload a zombie atlas: check its face.
+      if (n % 120 === 0 && Object.keys(B.config.faces || {}).length) applyFaces();
+      if (!Object.keys(B.config.frames || {}).length) {
+        n++;
+        return;
+      }
       // Often while loading, then a few times per second.
       if (++n % (cc.director.getTotalFrames() < 1800 ? 3 : 15)) return;
       scanFrames();
     });
     cc.director.on(cc.Director.EVENT_AFTER_SCENE_LAUNCH, function () {
       scanFrames();
+      applyFaces();
       if (cc.director.getScene() && cc.director.getScene().name === 'mainScene') setTimeout(placeLogo, 50);
     });
   }

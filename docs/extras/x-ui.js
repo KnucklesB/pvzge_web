@@ -456,7 +456,13 @@
     Object.keys(raw.frames || {}).forEach(function (k) {
       frames[k] = { id: raw.frames[k] };
     });
+    var faces = {};
+    Object.keys(raw.faces || {}).forEach(function (w) {
+      var f = raw.faces[w];
+      faces[w] = { head: ref(f.head), jaw: ref(f.jaw), hideJaw: !!f.hideJaw };
+    });
     draft = {
+      faces: faces,
       title: raw.title || '',
       icon: ref(raw.icon),
       menuLogo: raw.menuLogo ? { img: ref(raw.menuLogo.img), x: raw.menuLogo.x, y: raw.menuLogo.y, scale: raw.menuLogo.scale } : null,
@@ -481,7 +487,18 @@
       icon: refUrl(draft.icon),
       menuLogo: draft.menuLogo && draft.menuLogo.img ? { url: refUrl(draft.menuLogo.img), x: draft.menuLogo.x, y: draft.menuLogo.y, scale: draft.menuLogo.scale } : null,
       frames: frames,
+      faces: draftFaces(refUrl),
     });
+  }
+
+  // Draft faces with their images turned into URLs (preview) or ids (save).
+  function draftFaces(conv) {
+    var out = {};
+    Object.keys(draft.faces).forEach(function (w) {
+      var f = draft.faces[w];
+      if (f && f.head) out[w] = { head: conv(f.head), jaw: f.jaw ? conv(f.jaw) : null, hideJaw: !!f.hideJaw };
+    });
+    return out;
   }
 
   function changed() {
@@ -564,6 +581,74 @@
     ]);
   }
 
+  // One world's zombie face: original -> new head, and the jaw.
+  function faceRow(world) {
+    var f = draft.faces[world] || null;
+    var orig = thumb(null, 'pvzx-orig');
+    var size = el('small');
+    X.brand
+      .originalFace(world, 'head')
+      .then(function (c) {
+        orig.replaceChildren(el('img', { src: c.toDataURL(), alt: '' }));
+        size.textContent = t('vis_size', { size: c.width + '×' + c.height });
+      })
+      .catch(function () {
+        orig.replaceChildren(el('span', { text: '?' }));
+      });
+    var setFace = function (patch) {
+      if (patch === null) delete draft.faces[world];
+      else draft.faces[world] = Object.assign({ head: null, jaw: null, hideJaw: false }, draft.faces[world] || {}, patch);
+      changed();
+    };
+    var jawMode = !f ? 'orig' : f.jaw ? 'img' : f.hideJaw ? 'hide' : 'orig';
+    var jaw = f
+      ? el('div.pvzx-face-jaw', null, [
+          el('span', { text: t('vis_jaw') }),
+          seg(
+            [
+              { value: 'orig', label: t('vis_jaw_orig') },
+              { value: 'hide', label: t('vis_jaw_hide') },
+              { value: 'img', label: t('vis_jaw_img') },
+            ],
+            jawMode,
+            function (v) {
+              if (v === 'img') {
+                pickImage(function (r) {
+                  setFace({ jaw: r, hideJaw: false });
+                });
+              } else setFace({ jaw: null, hideJaw: v === 'hide' });
+            },
+          ),
+        ])
+      : null;
+    return el('div.pvzx-face', null, [
+      el('div.pvzx-brand-row', null, [
+        el('div.pvzx-brand-name', null, [el('b', { text: t('world_' + world) }), size]),
+        orig,
+        el('span.pvzx-arrow', { text: '→' }),
+        thumb(f && refUrl(f.head)),
+        el('div.pvzx-brand-btns', null, [
+          el('button.mp-btn.mp-small.mp-green', { text: t('vis_choose'), onclick: function () {
+            pickImage(function (r) {
+              setFace({ head: r });
+            });
+          } }),
+          f ? el('button.mp-btn.mp-small.mp-red', { text: t('vis_remove'), onclick: function () {
+            setFace(null);
+          } }) : null,
+          el('button.mp-btn.mp-small.mp-blue', { text: t('vis_download'), title: t('vis_download_tip'), onclick: function () {
+            X.brand.originalFace(world, 'head').then(function (c) {
+              downloadCanvas(c, 'face-' + world);
+            }).catch(function () {
+              MP.ui.toast(t('vis_no_original'), 'warn');
+            });
+          } }),
+        ]),
+      ]),
+      jaw,
+    ]);
+  }
+
   function slider(label, value, min, max, step, onInput) {
     var out = el('span.pvzx-slider-val', { text: String(value) });
     var input = el('input', { type: 'range', min: min, max: max, step: step, value: value });
@@ -586,6 +671,10 @@
     if (draft.menuLogo) collect(draft.menuLogo.img);
     Object.keys(draft.frames).forEach(function (k) {
       collect(draft.frames[k]);
+    });
+    Object.keys(draft.faces).forEach(function (w) {
+      collect(draft.faces[w].head);
+      collect(draft.faces[w].jaw);
     });
     // Same picked image used for several frames: upload it once.
     var uploads = {};
@@ -610,6 +699,9 @@
             icon: draft.icon && draft.icon.id,
             menuLogo: draft.menuLogo && draft.menuLogo.img ? { img: draft.menuLogo.img.id, x: draft.menuLogo.x, y: draft.menuLogo.y, scale: draft.menuLogo.scale } : null,
             frames: frames,
+            faces: draftFaces(function (r) {
+              return r.id;
+            }),
           },
         });
       })
@@ -709,6 +801,15 @@
       quick.appendChild(frameRow(t('vis_slot_' + s[0]), s[1]));
     });
     body.appendChild(quick);
+
+    // Zombie faces
+    var facePanel = el('div.mp-panel', null, [el('div.mp-panel-title', { text: t('vis_faces') }), el('p.pvzx-muted', { text: t('vis_faces_tip') })]);
+    if (!(MP.game && MP.game.ready)) facePanel.appendChild(el('p.pvzx-muted', { text: t('loading') }));
+    else
+      X.brand.WORLDS.forEach(function (w) {
+        facePanel.appendChild(faceRow(w[0]));
+      });
+    body.appendChild(facePanel);
 
     // Any image
     var slotNames = {};
