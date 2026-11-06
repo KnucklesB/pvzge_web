@@ -29,6 +29,7 @@
  *   achievements   unlocked achievements per account
  *   branding_images  logos / images uploaded by admins (meta 'branding'
  *                  holds which game image each one replaces)
+ *   match_stats    Plant Match counters per plant (likes, matches, dates…)
  *
  * Users, sessions and recent matches are cached in memory (loaded at start);
  * every change is written through. Saves are always read from the database.
@@ -124,6 +125,12 @@ const SCHEMA = [
     achievement VARCHAR(48) NOT NULL,
     unlocked_at BIGINT NOT NULL,
     PRIMARY KEY (user_id, achievement)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS match_stats (
+    code VARCHAR(48) NOT NULL,
+    kind VARCHAR(16) NOT NULL,
+    n BIGINT NOT NULL,
+    PRIMARY KEY (code, kind)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS branding_images (
     id CHAR(40) NOT NULL PRIMARY KEY,
@@ -257,6 +264,9 @@ class MariaStore extends BaseStore {
       (ach[r.user_id] = ach[r.user_id] || {})[r.achievement] = Number(r.unlocked_at);
     }
     this.db.achievements = ach;
+    const ms = {};
+    for (const r of await this.pool.query('SELECT * FROM match_stats')) (ms[r.code] = ms[r.code] || {})[r.kind] = Number(r.n);
+    this.db.matchStats = ms;
     this.index();
   }
 
@@ -380,6 +390,10 @@ class MariaStore extends BaseStore {
         pairs.map(([id, at]) => [userId, id, at]),
       ),
     );
+  }
+
+  persistMatchStats(rows) {
+    return this.enqueue('match stats', (db) => db.batch('REPLACE INTO match_stats (code, kind, n) VALUES (?, ?, ?)', rows));
   }
 
   /* saves */
@@ -610,6 +624,12 @@ class MariaStore extends BaseStore {
         for (const [id, at] of Object.entries(map)) {
           const r = await conn.query('INSERT IGNORE INTO achievements (user_id, achievement, unlocked_at) VALUES (?, ?, ?)', [uid, id, at]);
           out.achievements += r.affectedRows || 0;
+        }
+      }
+      for (const [code, kinds] of Object.entries(db.matchStats || {})) {
+        for (const [kind, n] of Object.entries(kinds || {})) {
+          // Keep the larger counter (the import is safe to repeat).
+          await conn.query('INSERT INTO match_stats (code, kind, n) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE n = GREATEST(n, VALUES(n))', [code, kind, Number(n) || 0]);
         }
       }
       await conn.commit();

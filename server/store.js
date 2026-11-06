@@ -25,6 +25,7 @@ const { newToken, hashToken } = require('./auth');
 const SESSION_TTL = 60 * 24 * 3600 * 1000;
 const MAX_MATCHES = 2000;
 const MAX_SCORES = 500; // kept per board
+const MAX_MATCH_PLANTS = 2000;
 
 function atomicWrite(file, data) {
   const tmp = file + '.' + process.pid + '.tmp';
@@ -88,7 +89,7 @@ function normalizeSave(text) {
  */
 class BaseStore {
   constructor() {
-    this.db = { users: {}, sessions: {}, matches: [], secret: '', scores: {}, achievements: {} };
+    this.db = { users: {}, sessions: {}, matches: [], secret: '', scores: {}, achievements: {}, matchStats: {} };
     this.byName = new Map();
     setInterval(() => this.pruneSessions(), 3600 * 1000).unref();
   }
@@ -116,6 +117,7 @@ class BaseStore {
   persistMatch() {}
   persistScore() {}
   persistAchievements() {}
+  persistMatchStats() {}
   checkWritable() {}
   flushSync() {}
   async close() {}
@@ -286,6 +288,37 @@ class BaseStore {
     });
   }
 
+  /* Plant Match: how often every plant was liked, matched, won a date…
+     (counters from every player; {code: {kind: n}}) */
+
+  addMatchStats(events) {
+    const stats = (this.db.matchStats = this.db.matchStats || {});
+    const changed = [];
+    for (const [code, kinds] of Object.entries(events)) {
+      if (!stats[code] && Object.keys(stats).length >= MAX_MATCH_PLANTS) continue;
+      const row = (stats[code] = stats[code] || {});
+      for (const [kind, n] of Object.entries(kinds)) {
+        row[kind] = (row[kind] || 0) + n;
+        changed.push([code, kind, row[kind]]);
+      }
+    }
+    if (changed.length) this.persistMatchStats(changed);
+  }
+
+  // Top plants of each kind: {kind: [{code, n}]}.
+  topMatchStats(kinds, limit) {
+    const stats = this.db.matchStats || {};
+    const out = {};
+    for (const kind of kinds) {
+      out[kind] = Object.entries(stats)
+        .filter(([, r]) => r[kind] > 0)
+        .map(([code, r]) => ({ code, n: r[kind] }))
+        .sort((a, b) => b.n - a.n || (a.code < b.code ? -1 : 1))
+        .slice(0, limit);
+    }
+    return out;
+  }
+
   /* achievements: {id: unlockedAt} per account */
 
   getAchievements(userId) {
@@ -365,6 +398,9 @@ class FileStore extends BaseStore {
     this.dirty();
   }
   persistAchievements() {
+    this.dirty();
+  }
+  persistMatchStats() {
     this.dirty();
   }
 

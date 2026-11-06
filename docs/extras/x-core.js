@@ -14,7 +14,7 @@
 
   var MP = window.PvZMP;
   var X = (window.PvZX = new MP.Emitter());
-  X.VERSION = '1.9.0';
+  X.VERSION = '2.0.0';
 
   /* ------------------------------------------------------------ storage */
 
@@ -1105,6 +1105,14 @@
     },
     postScore: function (board, score, details) {
       return api.request('POST', '/scores/' + encodeURIComponent(board), { score: score, details: details || {} });
+    },
+    matchStats: function () {
+      return api.request('GET', '/match/stats', undefined, { anonymous: true }).then(function (r) {
+        return r.top || {};
+      });
+    },
+    postMatchStats: function (events) {
+      return api.request('POST', '/match/stats', { events: events }, { anonymous: true });
     },
     achievements: function () {
       return api.request('GET', '/achievements').then(function (r) {

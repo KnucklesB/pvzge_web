@@ -14,12 +14,19 @@
  * badges, headline, stats, the almanac's texts, family interests and a team
  * compatibility score.
  *
- * Messages: every match starts a short scripted chat (3 exchanges, replies
- * that land well, so-so or badly; some plants ghost you). Affinity gives
- * extra starting sun in the level.
+ * Messages: every match starts a scripted chat in the plant's personality
+ * (3 exchanges; the second asks about her role, world, interests or price;
+ * one sticker per chat). Chats are kept between rounds: plants remember you,
+ * write after the levels you played together and partners get jealous.
+ * Affinity gives extra starting sun in the level.
  * Likes: plants that liked you, blurred until you spend a reveal.
- * Dates: a mini level alone with a match; winning makes it your partner:
- * partners always match again and bring plant food to Plant Match levels.
+ * Dates: levels of several kinds (picnic, candlelight in the fog, speed
+ * date, no-mower adventure, double date, wedding) with up to 3 stars;
+ * winning one makes the plant your partner. Relationships grow (seeing each
+ * other, dating, engaged, married) with dates, gifts and levels together,
+ * and partners in the team bring sun and plant food.
+ * Social: the week's theme family, the most liked plants of the server,
+ * level/couple/week rankings and team codes to share.
  *
  * The level: up to 8 matches become the seed bank of a 15-wave level in a
  * random arena, scored on the "challenge:match" leaderboard.
@@ -46,17 +53,25 @@
   /* ------------------------------------------------------------ helpers */
 
   // Texts of this mode: {pt, en, zh} with {vars}.
+  function fill(s, vars) {
+    if (!vars) return s;
+    return String(s).replace(/\{(\w+)\}/g, function (_, k) {
+      return vars[k] != null ? vars[k] : '';
+    });
+  }
   function L(o, vars) {
     var s = (o && (o[MP.lang] || o.en)) || '';
-    if (vars) {
-      s = s.replace(/\{(\w+)\}/g, function (_, k) {
-        return vars[k] != null ? vars[k] : '';
-      });
-    }
-    return s;
+    return typeof s === 'string' ? fill(s, vars) : s;
+  }
+  // A random line of a {pt: [...], en: [...]} list.
+  function Lp(o, vars) {
+    var list = (o && (o[MP.lang] || o.en)) || [''];
+    return fill(list[Math.floor(Math.random() * list.length)], vars);
   }
 
+  var featureCache = {};
   function plantFeature(code) {
+    if (code in featureCache) return featureCache[code];
     var P = G.m.Plants;
     var out = null;
     Object.keys(P.PlantEnum).some(function (k) {
@@ -65,6 +80,7 @@
       if (f && f.CODENAME === code) out = f;
       return !!out;
     });
+    featureCache[code] = out;
     return out;
   }
 
@@ -98,106 +114,17 @@
   M.FAMILIES = ['Peashooter', 'Sun', 'Defence', 'Explosive', 'Lobber', 'Sharp', 'Cold', 'Melee', 'Poison', 'Slow', 'Fire', 'Shadow', 'Electricity', 'Magic', 'Nope'];
 
   // Made-up ages by the world the plant comes from (years).
-  var WORLD_AGE = { frontyard: 2, egypt: 4500, pirate: 300, cowboy: 150, kongfu: 1200, future: -300, dark: 700, beach: 25, ice: 10000, lostcity: 90, eighties: 40, dino: 65000000, modern: 1, sky: 3 };
+  var WORLD_AGE = { frontyard: 2, egypt: 4500, pirate: 300, cowboy: 150, kongfu: 1200, future: -300, dark: 700, beach: 25, ice: 10000, lostcity: 90, eighties: 40, dino: 65000000, modern: 5, sky: 3 };
   var CLASSIC_WORLDS = { frontyard: 1, egypt: 1, pirate: 1, cowboy: 1 };
   var NEW_WORLDS = { eighties: 1, dino: 1, modern: 1, sky: 1, lostcity: 1, epic: 1 };
   var STAGE_OF_WORLD = { frontyard: 'modern', modern: 'modern', egypt: 'egypt', cowboy: 'west', future: 'future', dark: 'dark' };
 
-  var TXT = {
-    age: { pt: '{n} anos', en: '{n} years', zh: '{n} 岁' },
-    ageFuture: { pt: 'ainda vai nascer', en: 'not born yet', zh: '还没出生' },
-    likesLeft: { pt: 'curtidas hoje', en: 'likes today', zh: '今日喜欢' },
-    supers: { pt: 'superlikes', en: 'super likes', zh: '超级喜欢' },
-    tabDiscover: { pt: 'Descobrir', en: 'Discover', zh: '发现' },
-    tabMessages: { pt: 'Mensagens', en: 'Messages', zh: '消息' },
-    tabLikes: { pt: 'Curtidas', en: 'Likes', zh: '喜欢我' },
-    tabPartners: { pt: 'Namoros', en: 'Partners', zh: '恋人' },
-    undo: { pt: 'Desfazer o último swipe (1 por rodada, Backspace)', en: 'Undo the last swipe (1 per round, Backspace)', zh: '撤销上一次滑动（每轮 1 次，Backspace）' },
-    boost: { pt: 'Boost: mostra primeiro as plantas mais compatíveis (1 por rodada)', en: 'Boost: most compatible plants first (1 per round)', zh: '加速：优先显示最契合的植物（每轮 1 次）' },
-    boosted: { pt: '🚀 Boost ativo: as próximas são as mais compatíveis!', en: '🚀 Boost on: the next profiles are the most compatible!', zh: '🚀 加速中：接下来是最契合的植物！' },
-    noLikes: { pt: 'Suas curtidas de hoje acabaram', en: 'You are out of likes for today', zh: '今天的喜欢次数用完了' },
-    noLikesDesc: { pt: 'Volte amanhã, ou vença uma fase do Match de Plantas para ganhar +10 curtidas, 1 superlike e 1 revelação.', en: 'Come back tomorrow, or win a Plant Match level for +10 likes, 1 super like and 1 reveal.', zh: '明天再来，或赢得一局植物配对，获得 +10 喜欢、1 个超级喜欢和 1 次揭晓。' },
-    likedYou: { pt: '💛 Curtiu você', en: '💛 Liked you', zh: '💛 喜欢你' },
-    badgeVerified: { pt: '✔ Verificada', en: '✔ Verified', zh: '✔ 已认证' },
-    badgeLegend: { pt: '👑 Lendária', en: '👑 Legendary', zh: '👑 传奇' },
-    badgeNew: { pt: '✨ Nova no app', en: '✨ New here', zh: '✨ 新人' },
-    badgePopular: { pt: '🔥 Popular', en: '🔥 Popular', zh: '🔥 人气' },
-    badgePartner: { pt: '💍 Namora você', en: '💍 Your partner', zh: '💍 你的恋人' },
-    photoWater: { pt: 'Na piscina', en: 'At the pool', zh: '泳池' },
-    photoDeath: { pt: 'Dia ruim', en: 'Bad day', zh: '糟糕的一天' },
-    msgsEmpty: { pt: 'Nenhum match ainda. Vá em Descobrir e curta algumas plantas!', en: 'No matches yet. Go to Discover and like some plants!', zh: '还没有配对。去“发现”喜欢一些植物吧！' },
-    newMatch: { pt: 'Novo match! Diga oi.', en: 'New match! Say hi.', zh: '新配对！打个招呼吧。' },
-    typing: { pt: 'digitando…', en: 'typing…', zh: '正在输入…' },
-    ghosted: { pt: '{name} parou de responder. 👻', en: '{name} stopped replying. 👻', zh: '{name} 不再回复了。👻' },
-    seen: { pt: 'visto por último há {n} h', en: 'last seen {n} h ago', zh: '{n} 小时前在线' },
-    affinity: { pt: 'Afinidade', en: 'Affinity', zh: '好感度' },
-    viewProfile: { pt: 'Ver perfil', en: 'View profile', zh: '查看资料' },
-    invite: { pt: '💐 Convidar para um encontro', en: '💐 Ask out on a date', zh: '💐 邀请约会' },
-    inviteDesc: { pt: 'Uma fase curta só com {name}. Se vocês vencerem, viram namorados: {name} sempre dá match e traz 1 adubo para as fases do Match de Plantas.', en: 'A short level alone with {name}. Win it and you become partners: {name} always matches and brings 1 plant food to Plant Match levels.', zh: '只和 {name} 一起的短关卡。获胜后你们将成为恋人：{name} 总会配对，并为植物配对关卡带来 1 个能量豆。' },
-    likesTitle: { pt: '{n} plantas curtiram você', en: '{n} plants liked you', zh: '{n} 株植物喜欢你' },
-    likesDesc: { pt: 'Use uma revelação para ver quem é. Curtir de volta é match na hora. Você ganha revelações vencendo fases e encontros.', en: 'Spend a reveal to see who it is. Liking back is an instant match. Win levels and dates to earn reveals.', zh: '使用揭晓次数来查看是谁。回喜欢即可立即配对。赢得关卡和约会可获得揭晓次数。' },
-    reveals: { pt: 'Revelações: {n}', en: 'Reveals: {n}', zh: '揭晓次数：{n}' },
-    reveal: { pt: 'Revelar', en: 'Reveal', zh: '揭晓' },
-    seeNow: { pt: 'Ver agora', en: 'See now', zh: '立即查看' },
-    likesNone: { pt: 'Ninguém novo por enquanto. Continue no Descobrir!', en: 'Nobody new for now. Keep discovering!', zh: '暂时没有新的喜欢。继续发现吧！' },
-    partnersTitle: { pt: 'Seus namoros', en: 'Your partners', zh: '你的恋人' },
-    partnersDesc: { pt: 'Plantas com quem você venceu um encontro. Sempre dão match, e cada uma no time traz 1 adubo no início das fases deste modo (até 3).', en: 'Plants you won a date with. They always match, and each one in your team brings 1 plant food at the start of this mode’s levels (up to 3).', zh: '与你约会获胜的植物。它们总会配对，每株在队伍中时，本模式关卡开始时带来 1 个能量豆（最多 3 个）。' },
-    partnersNone: { pt: 'Nenhum namoro ainda. Convide um match para um encontro pela conversa.', en: 'No partners yet. Ask a match out on a date from the chat.', zh: '还没有恋人。在聊天中邀请配对对象约会吧。' },
-    since: { pt: 'juntos desde {d}', en: 'together since {d}', zh: '自 {d} 起在一起' },
-    bonus: { pt: 'Bônus da fase: +{sun} ☀ · {food} adubo(s)', en: 'Level bonus: +{sun} ☀ · {food} plant food', zh: '关卡加成：+{sun} ☀ · {food} 能量豆' },
-    dateName: { pt: 'Encontro com {name}', en: 'Date with {name}', zh: '与 {name} 约会' },
-    dateWon: { pt: '💍 {name} agora namora você!', en: '💍 {name} is now your partner!', zh: '💍 {name} 现在是你的恋人了！' },
-    dateLost: { pt: '💔 O encontro não deu certo... tente de novo pela conversa.', en: '💔 The date didn’t work out... try again from the chat.', zh: '💔 约会不太顺利……在聊天中再试一次吧。' },
-    reward: { pt: '🎁 +10 curtidas, +1 superlike e +1 revelação no Match de Plantas!', en: '🎁 +10 likes, +1 super like and +1 reveal in Plant Match!', zh: '🎁 植物配对：+10 喜欢、+1 超级喜欢、+1 揭晓！' },
-    headlines: {
-      pt: ['Fã de {a} e {b}.', 'Procurando alguém para dividir o gramado.', 'Se você gosta de {a}, já temos algo em comum.', 'Vim de {w} só para te conhecer.', '{a}, {b} e zumbis derrotados. Nessa ordem.'],
-      en: ['Into {a} and {b}.', 'Looking for someone to share a lawn with.', 'If you like {a}, we already have something in common.', 'Came all the way from {w} to meet you.', '{a}, {b} and defeated zombies. In that order.'],
-      zh: ['喜欢{a}和{b}。', '想找人一起守护草坪。', '如果你喜欢{a}，我们已经有共同点了。', '为了认识你，我从{w}赶来。', '{a}、{b}和被打败的僵尸，按这个顺序。'],
-    },
-  };
-
-  // The chat script: 3 exchanges. Each reply is good (+1 affinity), so-so
-  // or bad; exchange 2 asks about the role the plant plays.
-  var CHAT = {
-    openers: {
-      pt: ['Oi! Vi que você também curte {like}. 😊', 'Então... você planta na primeira fileira ou é do tipo que espera?', 'Confesso: dei like porque gostei do seu gramado.', 'Sem rodeios: quantos zumbis você já derrotou?', 'Oi! Prometo não ocupar mais que uma casa. 🌱'],
-      en: ['Hi! I see you’re into {like} too. 😊', 'So... do you plant in the front row or are you the waiting type?', 'Confession: I liked you because of your lawn.', 'Straight to the point: how many zombies have you beaten?', 'Hi! I promise I only take one square. 🌱'],
-      zh: ['嗨！看到你也喜欢{like}。😊', '那么……你喜欢种在第一排，还是会等一等？', '坦白说：我点喜欢是因为你的草坪。', '直接问吧：你打败过多少僵尸？', '嗨！我保证只占一格。🌱'],
-    },
-    r1: [
-      { q: 'good', pt: 'Adorei seu perfil, {name}! Ainda mais a parte de {like}.', en: 'Loved your profile, {name}! Especially the {like} part.', zh: '{name}，我很喜欢你的资料！尤其是{like}那部分。' },
-      { q: 'meh', pt: 'Oi, tudo bem?', en: 'Hey, how are you?', zh: '嗨，你好吗？' },
-      { q: 'bad', pt: 'Só dei like porque você é barata.', en: 'I only liked you because you’re cheap.', zh: '我点喜欢只是因为你便宜。' },
-    ],
-    r2q: { pt: 'Me conta: o que você procura numa planta?', en: 'Tell me: what are you looking for in a plant?', zh: '告诉我：你想找什么样的植物？' },
-    roles: {
-      sun: { pt: 'Alguém que traga energia para o time ☀️', en: 'Someone who brings energy to the team ☀️', zh: '能为队伍带来能量的伙伴 ☀️' },
-      defense: { pt: 'Alguém que segure a barra quando apertar 🛡️', en: 'Someone who holds the line when it gets tough 🛡️', zh: '关键时刻能顶住的伙伴 🛡️' },
-      attack: { pt: 'Alguém que parta para cima dos zumbis ⚔️', en: 'Someone who goes after the zombies ⚔️', zh: '敢冲向僵尸的伙伴 ⚔️' },
-      area: { pt: 'Alguém que resolva tudo de uma vez 💥', en: 'Someone who solves it all at once 💥', zh: '能一次解决所有问题的伙伴 💥' },
-      support: { pt: 'Alguém que ajude todo mundo 🤝', en: 'Someone who helps everyone 🤝', zh: '乐于帮助大家的伙伴 🤝' },
-    },
-    r3q: { pt: 'Então... topa um encontro? Onda 1, no seu quintal. 🌻', en: 'So... how about a date? Wave 1, at your front yard. 🌻', zh: '那么……约会吗？第 1 波，在你家前院。🌻' },
-    r3: [
-      { q: 'good', pt: 'Claro! Já guardei a melhor casa pra você.', en: 'Of course! I saved the best square for you.', zh: '当然！我给你留了最好的格子。' },
-      { q: 'meh', pt: 'Pode ser, vou ver minha agenda.', en: 'Maybe, let me check my schedule.', zh: '也许吧，我看看日程。' },
-      { q: 'bad', pt: 'Acho que não, prefiro jogar sozinho.', en: 'I don’t think so, I’d rather play alone.', zh: '算了吧，我更喜欢一个人玩。' },
-    ],
-    react: {
-      good: { pt: ['Aaah, que fofo! 😍', 'Você sabe conversar! 💚', 'Ganhou meu coração (e minha folha). 🌿'], en: ['Aww, how sweet! 😍', 'You know how to talk! 💚', 'You won my heart (and my leaf). 🌿'], zh: ['哇，好甜！😍', '你真会聊天！💚', '你赢得了我的心（和我的叶子）。🌿'] },
-      meh: { pt: ['Entendi. 🙂', 'Hmm, ok! 🙂', 'Ah... legal.'], en: ['I see. 🙂', 'Hmm, okay! 🙂', 'Oh... nice.'], zh: ['明白了。🙂', '嗯，好的！🙂', '哦……不错。'] },
-      hello: { pt: ['Tudo ótimo! E você?'], en: ['All good! You?'], zh: ['都挺好！你呢？'] },
-      bad: { pt: ['Hmm... ok então. 😐', 'Nossa. 🙄', 'Tá bom, né...'], en: ['Hmm... okay then. 😐', 'Wow. 🙄', 'Sure, I guess...'], zh: ['嗯……好吧。😐', '哇哦。🙄', '行吧……'] },
-    },
-    roleGood: { pt: 'É exatamente isso que eu faço! 😍', en: 'That’s exactly what I do! 😍', zh: '这正是我擅长的！😍' },
-    roleMeh: { pt: 'Ah... não é bem a minha praia.', en: 'Oh... that’s not really my thing.', zh: '哦……那不太是我的强项。' },
-    end: {
-      3: { pt: 'Você é demais! Vou dar o meu melhor na fase. 🔥', en: 'You’re amazing! I’ll give it my all in the level. 🔥', zh: '你太棒了！我会在关卡里全力以赴。🔥' },
-      2: { pt: 'Foi legal conversar! Até o gramado. 🌱', en: 'Nice talking! See you on the lawn. 🌱', zh: '聊得很开心！草坪上见。🌱' },
-      1: { pt: 'Tá... a gente se vê.', en: 'Okay... see you around.', zh: '好吧……回头见。' },
-      0: { pt: 'Tá... a gente se vê.', en: 'Okay... see you around.', zh: '好吧……回头见。' },
-    },
-  };
+  var MT = X.matchText;
+  var TXT = MT.TXT;
+  var CHAT = MT.CHAT;
+  var PERS = MT.PERS;
+  var DATES = MT.DATES;
+  var STAGES = MT.STAGES;
 
   /* ---------------------------------------------- persistent counters */
 
@@ -221,8 +148,15 @@
   function reveals() {
     return X.store.get('matchReveals', 2);
   }
+  // Partners: {code: {since, xp, married, dates: {type: stars}, gifts}}.
   function partners() {
-    return X.store.get('matchPartners', {});
+    var ps = X.store.get('matchPartners', {});
+    Object.keys(ps).forEach(function (c) {
+      var r = ps[c];
+      if (typeof r.xp !== 'number') r.xp = 0;
+      if (!r.dates) r.dates = {};
+    });
+    return ps;
   }
   M.reward = function () {
     var s = likesState();
@@ -316,6 +250,10 @@
       partner: !!partners()[code],
     };
     p.roles = rolesOf(p);
+    var persKeys = Object.keys(PERS);
+    p.pers = persKeys[X.hashSeed('pers:' + code) % persKeys.length];
+    p.event = p.family === week().fam;
+    if (p.event) p.chance = Math.min(0.97, p.chance * 1.25);
     var age = WORLD_AGE[w];
     p.age = age == null ? '' : age < 0 ? L(TXT.ageFuture) : L(TXT.age, { n: age.toLocaleString(MP.lang === 'pt' ? 'pt-BR' : MP.lang === 'zh' ? 'zh-CN' : 'en-US') });
     var likes = t(famKey(p) + '_likes').split('|');
@@ -323,6 +261,8 @@
     p.headline = L({ pt: pick(TXT.headlines.pt), en: pick(TXT.headlines.en), zh: pick(TXT.headlines.zh) }, { a: (likes[0] || '').toLowerCase(), b: (likes[1] || '').toLowerCase(), w: p.world });
     p.badges = [];
     if (p.partner) p.badges.push(L(TXT.badgePartner));
+    if (p.event) p.badges.push(L(TXT.weekBadge));
+    p.badges.push(PERS[p.pers].icon + ' ' + L(PERS[p.pers].name));
     if (CLASSIC_WORLDS[w]) p.badges.push(L(TXT.badgeVerified));
     if (cost >= 300) p.badges.push(L(TXT.badgeLegend));
     if (NEW_WORLDS[w]) p.badges.push(L(TXT.badgeNew));
@@ -352,18 +292,38 @@
       });
       if (at > 4) cards.splice(2, 0, cards.splice(at, 1)[0]);
     }
+    var has = function (code) {
+      return cards.some(function (c) {
+        return c.code === code;
+      });
+    };
+    // Plants of the week's theme family: at least 5 in the deck.
+    var fam = week().fam;
+    var evCount = cards.filter(function (c) {
+      return c.event;
+    }).length;
+    for (var k = 0; k < codes.length && evCount < 5; k++) {
+      if (has(codes[k]) || famOf(codes[k]) !== fam) continue;
+      var ep = profile(codes[k]);
+      if (!ep) continue;
+      cards.splice(Math.floor(Math.random() * Math.min(16, cards.length + 1)), 0, ep);
+      evCount++;
+    }
     // Partners (dates won) always show up again early in the deck.
     shuffle(Object.keys(partners()))
-      .slice(0, 3)
+      .slice(0, SLOTS)
       .forEach(function (code) {
-        if (cards.some(function (c) {
-          return c.code === code;
-        })) return;
+        if (has(code)) return;
         var pp = profile(code);
         if (pp) cards.splice(Math.floor(Math.random() * Math.min(10, cards.length + 1)), 0, pp);
       });
     if (cards.length > DECK) cards.length = DECK;
-    round = { cards: cards, i: 0, matches: [], chats: {}, history: [], superUsed: false, undoUsed: false, boostUsed: false, boosted: false, revealed: {} };
+    // Chats from earlier rounds stay, their sessions end.
+    Object.keys(chats).forEach(function (c) {
+      chats[c].s = null;
+    });
+    saveChats();
+    round = { cards: cards, i: 0, matches: [], history: [], superUsed: false, undoUsed: false, boostUsed: false, boosted: false, revealed: {} };
     view.photo = 0;
     view.expanded = false;
     view.chat = null;
@@ -679,43 +639,187 @@
 
   /* -------------------------------------------------------------- chat */
 
-  function startChat(p) {
-    var opener = L({ pt: pick(CHAT.openers.pt), en: pick(CHAT.openers.en), zh: pick(CHAT.openers.zh) }, { like: (p.likes[0] || '').toLowerCase() });
-    round.chats[p.code] = { msgs: [{ from: 'them', text: opener }], step: 1, affinity: 0, ghost: false, done: false, unread: true, typing: false };
+  // Chats are kept between rounds (memory, partners' messages): {code:
+  // {msgs: [{from, text, k}], unread, at, s: session of this round, mem}}.
+  var chats = X.store.get('matchChats', {});
+  var typing = {};
+  var MAX_CHATS = 40;
+  var MAX_MSGS = 60;
+
+  function saveChats() {
+    var codes = Object.keys(chats);
+    if (codes.length > MAX_CHATS) {
+      var ps = partners();
+      codes
+        .filter(function (c) {
+          return !ps[c] && !(round && round.matches.some(function (m) {
+            return m.code === c;
+          }));
+        })
+        .sort(function (a, b) {
+          return chats[a].at - chats[b].at;
+        })
+        .slice(0, codes.length - MAX_CHATS)
+        .forEach(function (c) {
+          delete chats[c];
+        });
+    }
+    Object.keys(chats).forEach(function (c) {
+      var ch = chats[c];
+      if (ch.msgs.length > MAX_MSGS) {
+        var cut = ch.msgs.length - MAX_MSGS;
+        ch.msgs = ch.msgs.slice(cut);
+        if (ch.s) ch.s.start = Math.max(0, ch.s.start - cut);
+      }
+    });
+    X.store.set('matchChats', chats);
   }
 
-  function chatOptions(p, chat) {
-    if (chat.done || chat.ghost || chat.typing) return [];
-    if (chat.step === 1) {
-      return shuffle(
-        CHAT.r1.map(function (r) {
-          return { q: r.q, text: L(r, { name: p.name, like: (p.likes[0] || '').toLowerCase() }) };
+  function getChat(code) {
+    var c = chats[code];
+    if (!c) c = chats[code] = { msgs: [], unread: false, at: Date.now(), s: null, mem: { sessions: 0, wins: 0, levels: 0 } };
+    return c;
+  }
+
+  function viewingChat(code) {
+    return !!(node && view.tab === 'messages' && view.chat && view.chat.code === code);
+  }
+
+  function pushMsg(code, from, text, kind) {
+    var c = getChat(code);
+    c.msgs.push(kind ? { from: from, text: text, k: kind } : { from: from, text: text });
+    if (from !== 'me' && !viewingChat(code)) c.unread = true;
+    c.at = Date.now();
+    saveChats();
+  }
+
+  function persOf(p) {
+    return PERS[p.pers] || PERS.sweet;
+  }
+
+  function startChat(p) {
+    var c = getChat(p.code);
+    var mem = c.mem;
+    var start = c.msgs.length;
+    if (c.msgs.length) c.msgs.push({ from: 'sys', text: L(TXT.newSession) });
+    var text;
+    if (mem.sessions && mem.ghosted) text = Lp(CHAT.againGhost);
+    else if (mem.sessions && mem.wins) text = Lp(CHAT.againWins, { wins: mem.wins });
+    else if (mem.sessions && mem.role && CHAT.roles[mem.role]) text = Lp(CHAT.again, { role: L(CHAT.roles[mem.role]) });
+    else if (mem.sessions) text = Lp(CHAT.again, { role: L(CHAT.roles.sun) });
+    else text = Math.random() < 0.6 ? Lp(persOf(p).openers) : Lp(CHAT.openers, { like: (p.likes[0] || '').toLowerCase() });
+    mem.sessions++;
+    mem.ghosted = false;
+    c.s = { step: 1, affinity: 0, ghost: false, done: false, sticker: false, start: start, q2: null };
+    pushMsg(p.code, 'them', text);
+    c.unread = true;
+  }
+
+  // Undo / unmatch: the session of this round disappears.
+  function dropChat(code) {
+    var c = chats[code];
+    if (!c || !c.s) return;
+    c.msgs.length = Math.min(c.msgs.length, c.s.start);
+    c.s = null;
+    c.mem.sessions = Math.max(0, c.mem.sessions - 1);
+    c.unread = false;
+    saveChats();
+  }
+
+  var WORLD_LIST = ['frontyard', 'egypt', 'pirate', 'cowboy', 'kongfu', 'future', 'dark', 'beach', 'iceage', 'lostcity', 'eighties', 'dino', 'sky'];
+
+  function otherWorlds(p, n) {
+    return shuffle(
+      WORLD_LIST.map(function (w) {
+        return t('world_' + w);
+      }).filter(function (name) {
+        return name !== p.world && name.indexOf('world_') !== 0;
+      }),
+    ).slice(0, n);
+  }
+
+  function otherLikes(p, n) {
+    return shuffle(
+      M.FAMILIES.filter(function (f) {
+        return f !== p.family && f !== 'Nope';
+      }),
+    )
+      .slice(0, n)
+      .map(function (f) {
+        return t('family_' + f.toLowerCase() + '_likes').split('|')[0];
+      });
+  }
+
+  // Exchange 2: a question about the plant (role, world, interests, price).
+  function makeQ2(p) {
+    var types = ['role', 'role', 'like', 'cost'];
+    if (p.world !== t('match_world_other')) types.push('world');
+    var type = pick(types);
+    var opts;
+    var ask;
+    if (type === 'role') {
+      var right = mainRole(p);
+      ask = L(CHAT.r2q);
+      opts = [{ q: 'good', key: right }].concat(
+        shuffle(
+          Object.keys(CHAT.roles).filter(function (r) {
+            return r !== right;
+          }),
+        )
+          .slice(0, 2)
+          .map(function (r) {
+            return { q: 'meh', key: r };
+          }),
+      );
+      opts.forEach(function (o) {
+        o.text = L(CHAT.roles[o.key]);
+        o.role = true;
+      });
+    } else if (type === 'world') {
+      ask = L(CHAT.q.world.ask);
+      opts = [{ q: 'good', text: p.world }].concat(
+        otherWorlds(p, 2).map(function (w) {
+          return { q: 'meh', text: w };
         }),
       );
-    }
-    if (chat.step === 2) {
-      var right = mainRole(p);
-      var others = shuffle(
-        Object.keys(CHAT.roles).filter(function (r) {
-          return r !== right;
+    } else if (type === 'like') {
+      ask = L(CHAT.q.like.ask);
+      opts = [{ q: 'good', text: p.likes[0] || '?' }].concat(
+        otherLikes(p, 2).map(function (x) {
+          return { q: 'meh', text: x };
         }),
-      ).slice(0, 2);
-      if (!chat._r2) {
-        chat._r2 = shuffle(
-          [{ q: 'good', role: right }].concat(
-            others.map(function (r) {
-              return { q: 'meh', role: r };
-            }),
-          ),
-        );
-      }
-      return chat._r2.map(function (o) {
-        return { q: o.q, role: true, text: L(CHAT.roles[o.role]) };
-      });
+      );
+    } else {
+      ask = L(CHAT.q.cost.ask, { cost: p.cost });
+      var pricey = p.cost >= 175;
+      opts = [
+        { q: pricey ? 'good' : 'meh', text: L(CHAT.q.cost.worth) },
+        { q: pricey ? 'meh' : 'good', text: L(CHAT.q.cost.cheap) },
+        { q: 'bad', text: L(CHAT.q.cost.pricey) },
+      ];
     }
-    if (chat.step === 3) {
-      return (chat._r3 =
-        chat._r3 ||
+    return { type: type, ask: ask, opts: shuffle(opts) };
+  }
+
+  function chatOptions(p, c) {
+    var s = c.s;
+    if (!s || s.done || s.ghost || typing[p.code] || !inRound(p)) return [];
+    if (s.step === 1) {
+      return (s.o1 =
+        s.o1 ||
+        shuffle(
+          CHAT.r1.map(function (r) {
+            return { q: r.q, text: L(r, { name: p.name, like: (p.likes[0] || '').toLowerCase() }) };
+          }),
+        ));
+    }
+    if (s.step === 2) {
+      if (!s.q2) s.q2 = makeQ2(p);
+      return s.q2.opts;
+    }
+    if (s.step === 3) {
+      return (s.o3 =
+        s.o3 ||
         shuffle(
           CHAT.r3.map(function (r) {
             return { q: r.q, text: L(r) };
@@ -725,52 +829,388 @@
     return [];
   }
 
+  function inRound(p) {
+    return !!(round && round.matches.some(function (m) {
+      return m.code === p.code;
+    }));
+  }
+
+  function reactionTo(p, s, opt) {
+    var pers = persOf(p);
+    if (s.step === 2 && s.q2 && s.q2.type !== 'role') {
+      var q = CHAT.q[s.q2.type];
+      if (opt.q === 'good') return L(q.right);
+      if (opt.q === 'bad') return Lp(pers.bad);
+      return q.wrong ? L(q.wrong, { world: p.world, like: (p.likes[0] || '').toLowerCase() }) : Lp(CHAT.react.meh);
+    }
+    if (opt.role) return opt.q === 'good' ? L(CHAT.roleGood) : L(CHAT.roleMeh);
+    if (opt.q === 'good') return Math.random() < 0.6 ? Lp(pers.good) : Lp(CHAT.react.good);
+    if (opt.q === 'bad') return Math.random() < 0.7 ? Lp(pers.bad) : Lp(CHAT.react.bad);
+    return Lp(CHAT.react[s.step === 1 ? 'hello' : 'meh']);
+  }
+
   function reply(p, opt) {
-    var chat = round.chats[p.code];
-    if (!chat || chat.typing) return;
-    chat.msgs.push({ from: 'me', text: opt.text });
-    if (opt.q === 'good') chat.affinity++;
-    chat.typing = true;
+    var c = getChat(p.code);
+    var s = c.s;
+    if (!s || typing[p.code]) return;
+    pushMsg(p.code, 'me', opt.text);
+    if (opt.q === 'good') s.affinity = Math.min(3, s.affinity + 1);
+    if (opt.role) c.mem.role = opt.key;
+    typing[p.code] = true;
     render();
-    var delay = 700 + Math.random() * 700;
     setTimeout(function () {
-      chat.typing = false;
-      var reactions = opt.role ? (opt.q === 'good' ? L(CHAT.roleGood) : L(CHAT.roleMeh)) : pick(L(CHAT.react[chat.step === 1 && opt.q === 'meh' ? 'hello' : opt.q]));
+      typing[p.code] = false;
+      if (c.s !== s) return; // undone meanwhile
+      var reaction = reactionTo(p, s, opt);
       // Some plants ghost after a bad first reply (or just because).
-      if (chat.step === 1 && (opt.q === 'bad' ? Math.random() < 0.5 : Math.random() < 0.08)) {
-        chat.ghost = true;
-        chat.msgs.push({ from: 'sys', text: L(TXT.ghosted, { name: p.name }) });
+      if (s.step === 1 && Math.random() < (opt.q === 'bad' ? persOf(p).ghost : 0.05)) {
+        s.ghost = true;
+        c.mem.ghosted = true;
+        pushMsg(p.code, 'sys', L(TXT.ghosted, { name: p.name }));
       } else {
-        chat.msgs.push({ from: 'them', text: reactions });
-        chat.step++;
-        if (chat.step === 2) chat.msgs.push({ from: 'them', text: L(CHAT.r2q) });
-        else if (chat.step === 3) chat.msgs.push({ from: 'them', text: L(CHAT.r3q) });
+        pushMsg(p.code, 'them', reaction);
+        s.step++;
+        if (s.step === 2) {
+          s.q2 = makeQ2(p);
+          pushMsg(p.code, 'them', s.q2.ask);
+        } else if (s.step === 3) pushMsg(p.code, 'them', L(CHAT.r3q));
         else {
-          chat.done = true;
-          chat.msgs.push({ from: 'them', text: L(CHAT.end[Math.min(3, chat.affinity)]) });
-          if (chat.affinity >= 3) X.achievements && X.achievements.unlockExtra && X.achievements.unlockExtra(['match_chat']);
+          s.done = true;
+          pushMsg(p.code, 'them', L(CHAT.end[Math.min(3, s.affinity)]));
+          if (s.affinity >= 3) unlock(['match_chat']);
         }
       }
-      chat.unread = view.chat !== p;
+      saveChats();
       if (node) render();
-    }, delay);
+    }, 700 + Math.random() * 700);
+  }
+
+  function sendSticker(p, emoji) {
+    var c = getChat(p.code);
+    var s = c.s;
+    if (!s || s.sticker || s.ghost || typing[p.code]) return;
+    s.sticker = true;
+    pushMsg(p.code, 'me', emoji, 'sticker');
+    typing[p.code] = true;
+    render();
+    setTimeout(function () {
+      typing[p.code] = false;
+      if (c.s !== s) return;
+      if (emoji === persOf(p).sticker) {
+        s.affinity = Math.min(3, s.affinity + 1);
+        pushMsg(p.code, 'them', Lp(CHAT.stickerLove));
+      } else pushMsg(p.code, 'them', Lp(CHAT.stickerMeh));
+      if (node) render();
+    }, 600 + Math.random() * 500);
   }
 
   function affinityHearts(n) {
     return '❤'.repeat(n) + '♡'.repeat(Math.max(0, 3 - n));
   }
 
-  // Bonus the matches bring to the level.
+  function unlock(ids) {
+    if (X.achievements && X.achievements.unlockExtra) X.achievements.unlockExtra(ids);
+  }
+
+  /* ------------------------------------------------------ relationships */
+
+  // Stage: 0 seeing each other, 1 dating (3 xp), 2 engaged (8 xp), 3 married
+  // (won the wedding date). Bonus each partner brings in the team.
+  var STAGE_XP = [0, 3, 8];
+  var STAGE_BONUS = [
+    { sun: 25, food: 0 },
+    { sun: 0, food: 1 },
+    { sun: 50, food: 1 },
+    { sun: 100, food: 2 },
+  ];
+
+  function relStage(r) {
+    return r.married ? 3 : r.xp >= STAGE_XP[2] ? 2 : r.xp >= STAGE_XP[1] ? 1 : 0;
+  }
+
+  function stageLabel(i) {
+    return STAGES[i].icon + ' ' + L(STAGES[i].name);
+  }
+
+  function couplePoints(ps) {
+    return Object.keys(ps).reduce(function (n, c) {
+      return n + Math.max(0, ps[c].xp) + (ps[c].married ? 10 : 0);
+    }, 0);
+  }
+
+  function savePartners(ps) {
+    X.store.set('matchPartners', ps);
+    refreshPartnerFlags(ps);
+    postCouple(ps);
+  }
+
+  function refreshPartnerFlags(ps) {
+    var list = (round ? round.cards : []).concat(
+      Object.keys(profCache).map(function (k) {
+        return profCache[k];
+      }),
+    );
+    list.forEach(function (p) {
+      if (p) p.partner = !!ps[p.code];
+    });
+  }
+
+  function stageMessages(code, before, after) {
+    if (after <= before) return;
+    pushMsg(code, 'them', L(CHAT.relUp[after]));
+    pushMsg(code, 'sys', L(TXT.relUp, { icon: STAGES[after].icon, stage: L(STAGES[after].name) }));
+    if (MP.ui) MP.ui.toast(X.plantName(code) + ': ' + stageLabel(after), 'good');
+  }
+
+  // Relationship points: dates, gifts, levels together; jealousy takes them
+  // away, and a partner (not married) below 0 breaks up.
+  function addXp(code, n) {
+    var ps = partners();
+    var r = ps[code];
+    if (!r) return;
+    var before = relStage(r);
+    r.xp += n;
+    if (r.xp < 0 && !r.married) {
+      delete ps[code];
+      savePartners(ps);
+      pushMsg(code, 'them', L(CHAT.breakup));
+      pushMsg(code, 'sys', L(TXT.breakup, { name: X.plantName(code) }));
+      if (MP.ui) MP.ui.toast(L(TXT.breakup, { name: X.plantName(code) }), 'bad');
+      return;
+    }
+    if (r.xp < 0) r.xp = 0;
+    savePartners(ps);
+    stageMessages(code, before, relStage(r));
+  }
+
+  function giftDone(r, kind) {
+    return !!(r.gifts && r.gifts[kind] === today());
+  }
+
+  function gift(code, kind) {
+    var ps = partners();
+    var r = ps[code];
+    if (!r || giftDone(r, kind)) return;
+    if (kind === 'choc') {
+      if (likesLeft() < 5) return;
+      useLike(5);
+    }
+    r.gifts = r.gifts || {};
+    r.gifts[kind] = today();
+    X.store.set('matchPartners', ps);
+    pushMsg(code, 'me', kind === 'water' ? '💧' : '🍫', 'sticker');
+    pushMsg(code, 'them', Lp(CHAT.giftThanks));
+    addXp(code, kind === 'water' ? 1 : 2);
+    if (ps[code] && Math.random() < 0.3) {
+      var name = X.plantName(code);
+      if (Math.random() < 0.5 && X.store.get('matchGiftFood', 0) < 3) {
+        X.store.set('matchGiftFood', X.store.get('matchGiftFood', 0) + 1);
+        pushMsg(code, 'them', L(CHAT.giftBackFood));
+        if (MP.ui) MP.ui.toast(L(TXT.giftFood, { name: name }), 'good');
+      } else {
+        var st = likesState();
+        st.bonus += 5;
+        X.store.set('matchLikes', st);
+        pushMsg(code, 'them', L(CHAT.giftBackLikes));
+        if (MP.ui) MP.ui.toast(L(TXT.giftLikes, { name: name }), 'good');
+      }
+    }
+    render();
+  }
+
+  // Partners left out of a Plant Match level get jealous.
+  function jealousy(team) {
+    var ps = partners();
+    Object.keys(ps).forEach(function (code) {
+      if (team.indexOf(code) >= 0) return;
+      pushMsg(code, 'them', Lp(CHAT.jealous));
+      if (!ps[code].married) {
+        pushMsg(code, 'sys', L(TXT.jealousSys, { name: X.plantName(code) }));
+        addXp(code, -1);
+      }
+    });
+  }
+
+  // Bonus the matches bring to the level: chat affinity, partners, gifts.
   function levelBonus() {
     var sun = 0;
-    var food = 0;
+    var food = X.store.get('matchGiftFood', 0);
     var ps = partners();
     (round ? round.matches : []).forEach(function (m) {
-      var c = round.chats[m.code];
-      if (c && !c.ghost) sun += c.affinity * 25;
-      if (ps[m.code]) food++;
+      var c = chats[m.code];
+      if (c && c.s && !c.s.ghost) sun += c.s.affinity * 25;
+      if (ps[m.code]) {
+        var b = STAGE_BONUS[relStage(ps[m.code])];
+        sun += b.sun;
+        food += b.food;
+      }
     });
-    return { sun: Math.min(sun, 300), food: Math.min(food, 3) };
+    return { sun: Math.min(sun, 400), food: Math.min(food, 3) };
+  }
+
+  /* ----------------------------------------------- server and rankings */
+
+  // The week's theme family: shows up more, matches more easily, doubles
+  // the rewards with 3 of them in the team (weeks start on Monday).
+  var EVENT_FAMILIES = ['Peashooter', 'Sun', 'Defence', 'Explosive', 'Lobber', 'Sharp', 'Cold', 'Melee', 'Poison', 'Fire', 'Shadow', 'Electricity', 'Magic'];
+
+  function week() {
+    var n = Math.floor((Date.now() / 86400000 + 3) / 7);
+    return { n: n, fam: EVENT_FAMILIES[X.hashSeed('pvzx-week-' + n) % EVENT_FAMILIES.length] };
+  }
+  M.week = week;
+
+  // Counters sent to the server (anonymous) and kept locally.
+  var statQ = {};
+  var statTimer = null;
+
+  function statEvent(code, kind) {
+    var q = (statQ[code] = statQ[code] || {});
+    q[kind] = (q[kind] || 0) + 1;
+    var mine = X.store.get('matchMine', {});
+    var m = (mine[code] = mine[code] || {});
+    m[kind] = (m[kind] || 0) + 1;
+    X.store.set('matchMine', mine);
+    if (!statTimer) statTimer = setTimeout(flushStats, 15000);
+  }
+
+  function flushStats() {
+    if (statTimer) clearTimeout(statTimer);
+    statTimer = null;
+    var ev = statQ;
+    statQ = {};
+    if (!Object.keys(ev).length || !X.api.available()) return;
+    X.api.postMatchStats(ev).catch(function () {});
+  }
+
+  var coupleTimer = null;
+  function postCouple(ps) {
+    if (!X.api.available() || !X.api.loggedIn()) return;
+    var points = couplePoints(ps);
+    if (points <= X.store.get('matchCouplePosted', 0)) return;
+    clearTimeout(coupleTimer);
+    coupleTimer = setTimeout(function () {
+      var best = Object.keys(ps).sort(function (a, b) {
+        return ps[b].xp + (ps[b].married ? 10 : 0) - (ps[a].xp + (ps[a].married ? 10 : 0));
+      })[0];
+      X.api
+        .postScore('challenge:couple', points, { plant: best || '', rel: best ? String(relStage(ps[best])) : '', plants: Object.keys(ps).length })
+        .then(function () {
+          X.store.set('matchCouplePosted', points);
+        })
+        .catch(function () {});
+    }, 2000);
+  }
+
+  var social = { pop: null, popAt: 0, ranks: {}, rank: 'couple' };
+
+  function loadPopular() {
+    if (!X.api.available() || social.popLoading || Date.now() - social.popAt < 60000) return;
+    social.popLoading = true;
+    X.api
+      .matchStats()
+      .then(function (top) {
+        social.pop = top;
+      })
+      .catch(function () {
+        social.pop = social.pop || {};
+      })
+      .then(function () {
+        social.popLoading = false;
+        social.popAt = Date.now();
+        if (node && view.tab === 'social') render();
+      });
+  }
+
+  function rankBoard(id) {
+    return id === 'week' ? 'challenge:week-' + week().n : id === 'couple' ? 'challenge:couple' : 'challenge:match';
+  }
+
+  function loadRank(id) {
+    var board = rankBoard(id);
+    var r = (social.ranks[board] = social.ranks[board] || { at: 0 });
+    if (!X.api.available() || r.loading || Date.now() - r.at < 60000) return;
+    r.loading = true;
+    X.api
+      .scores(board, 10)
+      .then(function (res) {
+        r.list = res.scores || [];
+        r.me = res.me;
+      })
+      .catch(function () {
+        r.list = r.list || [];
+      })
+      .then(function () {
+        r.loading = false;
+        r.at = Date.now();
+        if (node && view.tab === 'social') render();
+      });
+  }
+
+  function copyText(text) {
+    var done = function () {
+      if (MP.ui) MP.ui.toast(L(TXT.shareCopied), 'good');
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () {
+        fallbackCopy(text);
+        done();
+      });
+    } else {
+      fallbackCopy(text);
+      done();
+    }
+  }
+
+  function fallbackCopy(text) {
+    var ta = el('textarea', { value: text });
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy');
+    } catch (e) {}
+    ta.remove();
+  }
+
+  function teamCode(codes) {
+    return 'PM1:' + codes.join('.');
+  }
+
+  function parseTeamCode(text) {
+    var m = /PM1:([a-z0-9_.]+)/i.exec(String(text || ''));
+    if (!m) return null;
+    var all = MP.allPlants();
+    var out = [];
+    m[1]
+      .toLowerCase()
+      .split('.')
+      .forEach(function (c) {
+        if (c && all.indexOf(c) >= 0 && out.indexOf(c) < 0 && out.length < SLOTS) out.push(c);
+      });
+    return out.length ? out : null;
+  }
+
+  // Profiles of plants outside the current deck (chats, partners).
+  var profCache = {};
+  function prof(code) {
+    var inDeck = round && round.cards.find(function (c) {
+      return c.code === code;
+    });
+    if (inDeck) return inDeck;
+    if (!(code in profCache)) profCache[code] = profile(code);
+    return profCache[code];
+  }
+
+  function famOf(code) {
+    var f = plantFeature(code);
+    if (!f) return '';
+    try {
+      return G.m.Plants.plants.getPlantProps(f.ID).Family || '';
+    } catch (e) {
+      return '';
+    }
   }
 
   /* ------------------------------------------------------------- swipe */
@@ -780,7 +1220,7 @@
   }
 
   function canSwipe() {
-    return !!current() && round.matches.length < SLOTS && view.tab === 'discover' && !view.prefs && !view.viewing;
+    return !!current() && round.matches.length < SLOTS && view.tab === 'discover' && !view.prefs && !view.viewing && !view.datePick;
   }
 
   function decide(kind) {
@@ -811,11 +1251,19 @@
       }
     }
     if (kind !== 'nope') {
+      statEvent(p.code, kind === 'super' ? 'super' : 'like');
       var chance = Math.min(0.97, p.chance * (0.7 + compatibility(p).score / 160));
       matched = kind === 'super' || p.likedYou || p.partner || Math.random() < chance;
       if (matched) {
         round.matches.push(p);
         startChat(p);
+        statEvent(p.code, 'match');
+        // A partner of the same family (not matched this round) notices.
+        var ps = partners();
+        Object.keys(ps).forEach(function (code) {
+          if (code === p.code || inRound({ code: code }) || famOf(code) !== p.family || Math.random() > 0.35) return;
+          pushMsg(code, 'them', Lp(CHAT.jealousMatch, { name: p.name }));
+        });
       }
     }
     round.history.push({ card: p, kind: kind, matched: matched, superExtra: usedSuperExtra });
@@ -842,7 +1290,7 @@
     }
     if (h.matched) {
       round.matches.splice(round.matches.indexOf(h.card), 1);
-      delete round.chats[h.card.code];
+      dropChat(h.card.code);
     }
     view.photo = 0;
     render();
@@ -1032,14 +1480,15 @@
         ),
       ]),
       el('div.pvzx-msec', null, [el('h4', { text: t('match_looking') }), el('p', { text: t(fam + '_wants') })]),
+      el('div.pvzx-msec', null, [el('h4', { text: L(TXT.personality) }), el('p', { text: PERS[p.pers].icon + ' ' + L(PERS[p.pers].name) })]),
       opts && opts.undo
         ? el('div.pvzx-file-actions', null, [
-            p.partner ? null : el('button.mp-btn.mp-small.mp-green', { text: L(TXT.invite), onclick: function () {
-              date(p);
+            el('button.mp-btn.mp-small.mp-green', { text: p.partner ? L(TXT.dateBtn) : L(TXT.invite), onclick: function () {
+              openDates(p);
             } }),
             el('button.mp-btn.mp-small.mp-red', { text: t('match_unmatch'), onclick: function () {
               round.matches.splice(round.matches.indexOf(p), 1);
-              delete round.chats[p.code];
+              dropChat(p.code);
               view.viewing = null;
               view.chat = null;
               render();
@@ -1107,6 +1556,14 @@
       badges(p),
       chips(p),
       details(p, { undo: round.matches.indexOf(p) >= 0 }),
+      relationBox(p),
+      el('div.pvzx-file-actions', null, [
+        el('button.mp-btn.mp-small.mp-blue', { text: L(TXT.shareProfile), onclick: function () {
+          copyText(
+            L(TXT.shareProfileText, { name: p.name, age: p.age || '?', fam: t(famKey(p)), cost: p.cost, pers: PERS[p.pers].icon + ' ' + L(PERS[p.pers].name), headline: p.headline }),
+          );
+        } }),
+      ]),
     ]);
     sheet.addEventListener('wheel', function (e) {
       e.stopPropagation();
@@ -1220,81 +1677,6 @@
     );
   }
 
-  function messagesTab(body) {
-    var p = view.chat;
-    if (p && round.matches.indexOf(p) < 0) p = view.chat = null;
-    if (!p) {
-      var list = el('div.pvzx-mlist');
-      if (!round.matches.length) list.appendChild(el('p.pvzx-mempty', { text: L(TXT.msgsEmpty) }));
-      round.matches.forEach(function (m) {
-        var c = round.chats[m.code];
-        var last = c && c.msgs[c.msgs.length - 1];
-        list.appendChild(
-          el('button.pvzx-mrow' + (c && c.unread ? '.pvzx-unread' : ''), { onclick: function () {
-            view.chat = m;
-            if (c) c.unread = false;
-            queuePhotos();
-            render();
-          } }, [
-            el('span.pvzx-mavatar.pvzx-fam-' + m.family.toLowerCase(), null, [el('img', { src: avatar(m), alt: '' })]),
-            el('span.pvzx-mrow-text', null, [
-              el('b', { text: m.name + (partners()[m.code] ? ' 💍' : '') }),
-              el('span', { text: last ? (last.from === 'me' ? '↪ ' : '') + last.text : L(TXT.newMatch) }),
-            ]),
-            el('span.pvzx-mrow-aff', { text: c && c.ghost ? '👻' : affinityHearts(c ? c.affinity : 0) }),
-          ]),
-        );
-      });
-      list.addEventListener('wheel', function (e) {
-        e.stopPropagation();
-      });
-      body.appendChild(list);
-      return;
-    }
-    var chat = round.chats[p.code];
-    var head = el('div.pvzx-chat-head', null, [
-      el('button.pvzx-x', { text: '←', onclick: function () {
-        view.chat = null;
-        render();
-      } }),
-      el('span.pvzx-mavatar.pvzx-fam-' + p.family.toLowerCase(), null, [p.photos && p.photos.idle ? animImg(p.photos.idle) : el('img', { src: avatar(p), alt: '' })]),
-      el('span.pvzx-mrow-text', null, [el('b', { text: p.name }), el('span', { text: chat.ghost ? L(TXT.seen, { n: 2 + p.distance }) : p.online ? t('match_online') : p.world })]),
-      el('button.pvzx-chip.pvzx-chip-btn', { text: L(TXT.viewProfile), onclick: function () {
-        view.viewing = p;
-        view.tab = 'discover';
-        render();
-      } }),
-    ]);
-    var log = el('div.pvzx-chat-log');
-    chat.msgs.forEach(function (m) {
-      log.appendChild(el('div.pvzx-bubble.pvzx-from-' + m.from, { text: m.text }));
-    });
-    if (chat.typing) log.appendChild(el('div.pvzx-bubble.pvzx-from-them.pvzx-typing', { text: L(TXT.typing) }));
-    log.addEventListener('wheel', function (e) {
-      e.stopPropagation();
-    });
-    var opts = el(
-      'div.pvzx-chat-opts',
-      null,
-      chatOptions(p, chat).map(function (o) {
-        return el('button.pvzx-chat-opt', { text: o.text, onclick: function () {
-          reply(p, o);
-        } });
-      }),
-    );
-    var foot = el('div.pvzx-chat-foot', null, [
-      el('span', { text: L(TXT.affinity) + ': ' + affinityHearts(chat.affinity) + (chat.affinity ? ' (+' + chat.affinity * 25 + ' ☀)' : '') }),
-      partners()[p.code] ? el('span', { text: L(TXT.badgePartner) }) : el('button.mp-btn.mp-small.mp-green', { text: L(TXT.invite), title: L(TXT.inviteDesc, { name: p.name }), onclick: function () {
-        date(p);
-      } }),
-    ]);
-    body.appendChild(el('div.pvzx-chat', null, [head, log, opts, foot]));
-    setTimeout(function () {
-      log.scrollTop = log.scrollHeight;
-    }, 0);
-    chat.unread = false;
-  }
-
   function likesTab(body) {
     var pending = round.cards.slice(round.i).filter(function (c) {
       return c.likedYou;
@@ -1336,23 +1718,443 @@
     body.appendChild(box);
   }
 
-  function partnersTab(body) {
+  // Chats listed: this round's matches, then partners and unread messages.
+  function chatCodes() {
     var ps = partners();
-    var codes = Object.keys(ps);
-    var box = el('div.pvzx-mlikes', null, [el('h3', { text: '💍 ' + L(TXT.partnersTitle) }), el('p.pvzx-small', { text: L(TXT.partnersDesc) })]);
-    if (!codes.length) box.appendChild(el('p.pvzx-mempty', { text: L(TXT.partnersNone) }));
-    var grid = el('div.pvzx-lgrid');
-    codes.forEach(function (code) {
-      var art = MP.cards && MP.cards.plantCanvas(code);
-      grid.appendChild(
-        el('div.pvzx-lcard', null, [
-          art ? el('img', { src: art.toDataURL(), alt: '' }) : null,
-          el('b', { text: X.plantName(code) }),
-          el('span.pvzx-small', { text: L(TXT.since, { d: new Date(ps[code].since).toLocaleDateString() }) }),
+    var codes = round.matches.map(function (m) {
+      return m.code;
+    });
+    Object.keys(chats)
+      .filter(function (c) {
+        return codes.indexOf(c) < 0 && chats[c].msgs.length && (ps[c] || chats[c].unread);
+      })
+      .sort(function (a, b) {
+        return chats[b].at - chats[a].at;
+      })
+      .forEach(function (c) {
+        codes.push(c);
+      });
+    return codes;
+  }
+
+  function avatarNode(p, animated) {
+    return el('span.pvzx-mavatar.pvzx-fam-' + p.family.toLowerCase(), null, [animated && p.photos && p.photos.idle ? animImg(p.photos.idle) : el('img', { src: avatar(p), alt: '' })]);
+  }
+
+  function messagesTab(body) {
+    var p = view.chat;
+    var ps = partners();
+    if (!p) {
+      var list = el('div.pvzx-mlist');
+      var codes = chatCodes();
+      if (!codes.length) list.appendChild(el('p.pvzx-mempty', { text: L(TXT.msgsEmpty) }));
+      codes.forEach(function (code) {
+        var m = prof(code);
+        if (!m) return;
+        var c = chats[code];
+        var last = c && c.msgs[c.msgs.length - 1];
+        var r = ps[code];
+        list.appendChild(
+          el('button.pvzx-mrow' + (c && c.unread ? '.pvzx-unread' : ''), { onclick: function () {
+            view.chat = m;
+            if (c) c.unread = false;
+            saveChats();
+            queuePhotos();
+            render();
+          } }, [
+            avatarNode(m),
+            el('span.pvzx-mrow-text', null, [
+              el('b', { text: m.name + (r ? ' ' + STAGES[relStage(r)].icon : '') }),
+              el('span', { text: last ? (last.from === 'me' ? '↪ ' : '') + last.text : L(TXT.newMatch) }),
+            ]),
+            el('span.pvzx-mrow-aff', { text: c && c.s ? (c.s.ghost ? '👻' : affinityHearts(c.s.affinity)) : '' }),
+          ]),
+        );
+      });
+      list.addEventListener('wheel', function (e) {
+        e.stopPropagation();
+      });
+      body.appendChild(list);
+      return;
+    }
+    var chat = getChat(p.code);
+    var s = chat.s;
+    var r = ps[p.code];
+    var head = el('div.pvzx-chat-head', null, [
+      el('button.pvzx-x', { text: '←', onclick: function () {
+        view.chat = null;
+        render();
+      } }),
+      avatarNode(p, true),
+      el('span.pvzx-mrow-text', null, [
+        el('b', { text: p.name }),
+        el('span', { text: s && s.ghost ? L(TXT.seen, { n: 2 + p.distance }) : r ? stageLabel(relStage(r)) : p.online ? t('match_online') : p.world }),
+      ]),
+      el('button.pvzx-chip.pvzx-chip-btn', { text: L(TXT.viewProfile), onclick: function () {
+        view.viewing = p;
+        view.tab = 'discover';
+        render();
+      } }),
+    ]);
+    var log = el('div.pvzx-chat-log');
+    chat.msgs.forEach(function (m) {
+      log.appendChild(el('div.pvzx-bubble.pvzx-from-' + m.from + (m.k === 'sticker' ? '.pvzx-sticker' : ''), { text: m.text }));
+    });
+    if (typing[p.code]) log.appendChild(el('div.pvzx-bubble.pvzx-from-them.pvzx-typing', { text: L(TXT.typing) }));
+    if (!inRound(p) && !r) log.appendChild(el('div.pvzx-bubble.pvzx-from-sys', { text: L(TXT.noChatHere) }));
+    log.addEventListener('wheel', function (e) {
+      e.stopPropagation();
+    });
+    var opts = el(
+      'div.pvzx-chat-opts',
+      null,
+      chatOptions(p, chat).map(function (o) {
+        return el('button.pvzx-chat-opt', { text: o.text, onclick: function () {
+          reply(p, o);
+        } });
+      }),
+    );
+    var stickers =
+      s && !s.sticker && !s.ghost && !typing[p.code] && inRound(p)
+        ? el(
+            'div.pvzx-stickers',
+            { title: L(TXT.stickerTip) },
+            CHAT.stickers.map(function (e) {
+              return el('button', { text: e, title: L(TXT.stickerTip), onclick: function () {
+                sendSticker(p, e);
+              } });
+            }),
+          )
+        : null;
+    var foot;
+    if (r) {
+      foot = el('div.pvzx-chat-foot', null, [
+        el('span', { text: stageLabel(relStage(r)) }),
+        el('span.pvzx-pbtns', null, giftButtons(p.code, r).concat([
+          el('button.mp-btn.mp-small.mp-green', { text: L(TXT.dateBtn), onclick: function () {
+            openDates(p);
+          } }),
+        ])),
+      ]);
+    } else if (s) {
+      foot = el('div.pvzx-chat-foot', null, [
+        el('span', { text: L(TXT.affinity) + ': ' + affinityHearts(s.affinity) + (s.affinity ? ' (+' + s.affinity * 25 + ' ☀)' : '') }),
+        el('button.mp-btn.mp-small.mp-green', { text: L(TXT.invite), title: L(TXT.inviteDesc, { name: p.name }), onclick: function () {
+          openDates(p);
+        } }),
+      ]);
+    }
+    body.appendChild(el('div.pvzx-chat', null, [head, log, stickers, opts, foot]));
+    setTimeout(function () {
+      log.scrollTop = log.scrollHeight;
+    }, 0);
+    if (chat.unread) {
+      chat.unread = false;
+      saveChats();
+    }
+  }
+
+  function giftButtons(code, r) {
+    return [
+      el('button.mp-btn.mp-small.mp-blue', { text: '💧', title: L(TXT.giftWater) + ': ' + L(TXT.giftWaterDesc), disabled: giftDone(r, 'water'), onclick: function () {
+        gift(code, 'water');
+      } }),
+      el('button.mp-btn.mp-small.mp-brown', { text: '🍫', title: L(TXT.giftChoc) + ': ' + L(TXT.giftChocDesc), disabled: giftDone(r, 'choc') || likesLeft() < 5, onclick: function () {
+        gift(code, 'choc');
+      } }),
+    ];
+  }
+
+  /* ------------------------------------------------------------- dates */
+
+  // need: -1 anyone you matched, 0 partners, 1 dating, 2 engaged (wedding).
+  var DATE_TYPES = [
+    { id: 'picnic', icon: '🧺', waves: 6, sun: 300, rate: 'fast', mut: [], need: -1, obj: ['nomower', 'nolost'] },
+    { id: 'candle', icon: '🕯️', stage: 'dark', waves: 6, sun: 300, rate: 'fast', mut: ['fog'], need: -1, obj: ['nolost', 'fast4'] },
+    { id: 'race', icon: '⏱️', waves: 5, sun: 350, rate: 'fast', mut: ['rush'], need: -1, obj: ['fast3', 'nomower'] },
+    { id: 'adventure', icon: '🤠', stage: 'west', waves: 8, sun: 250, rate: 'normal', mut: ['nomowers'], need: 0, obj: ['nolost', 'fast6'] },
+    { id: 'double', icon: '👯', waves: 7, sun: 300, rate: 'fast', mut: [], need: 1, friend: true, obj: ['nomower', 'nolost'] },
+    { id: 'wedding', icon: '💒', waves: 10, sun: 400, rate: 'fast', mut: ['horde'], need: 2, guests: true, obj: ['nomower', 'nolost'] },
+  ];
+
+  function secs(s) {
+    return ((s.endedAt || Date.now()) - (s.startedAt || Date.now())) / 1000;
+  }
+
+  var OBJ = {
+    nomower: { text: function () { return L(TXT.objNoMower); }, ok: function (s) { return !s.mowersUsed; } },
+    nolost: { text: function () { return L(TXT.objNoLost); }, ok: function (s) { return !s.lost; } },
+    fast3: { text: function () { return L(TXT.objFast, { m: 3 }); }, ok: function (s) { return secs(s) < 180; } },
+    fast4: { text: function () { return L(TXT.objFast, { m: 4 }); }, ok: function (s) { return secs(s) < 240; } },
+    fast6: { text: function () { return L(TXT.objFast, { m: 6 }); }, ok: function (s) { return secs(s) < 360; } },
+  };
+
+  function starsText(n) {
+    return '⭐'.repeat(n) + '☆'.repeat(3 - n);
+  }
+
+  function dateLock(dt, r) {
+    if (dt.need < 0) return '';
+    if (!r) return L(TXT.dateNeedPartner);
+    if (dt.id === 'wedding' && r.married) return stageLabel(3);
+    if (relStage(r) < dt.need) return L(TXT.dateNeed, { stage: stageLabel(dt.need) });
+    return '';
+  }
+
+  function openDates(p) {
+    view.datePick = p;
+    render();
+  }
+
+  function datePicker(p) {
+    var r = partners()[p.code];
+    var sheet = el('div.pvzx-mview.pvzx-dates', null, [
+      el('button.pvzx-x', { text: '←', title: t('close'), onclick: function () {
+        view.datePick = null;
+        render();
+      } }),
+      el('h3', { text: '💐 ' + L(TXT.dateTitle) }),
+      el('p.pvzx-small', { text: L(TXT.inviteDesc, { name: p.name }) }),
+    ]);
+    DATE_TYPES.forEach(function (dt) {
+      var lock = dateLock(dt, r);
+      var best = r && r.dates[dt.id];
+      sheet.appendChild(
+        el('button.pvzx-date' + (lock ? '.pvzx-locked' : ''), { disabled: !!lock, onclick: function () {
+          view.datePick = null;
+          date(p, dt);
+        } }, [
+          el('span.pvzx-date-icon', { text: dt.icon }),
+          el('span.pvzx-date-text', null, [
+            el('b', { text: L(DATES[dt.id].name) }),
+            el('span', { text: L(DATES[dt.id].desc) + ' · ' + L(TXT.dateWaves, { n: dt.waves }) }),
+            el('small', {
+              text: lock || '⭐ ' + [L(TXT.objWin)].concat(dt.obj.map(function (o) {
+                return OBJ[o].text();
+              })).join(' · ') + (best ? '  —  ' + L(TXT.dateBest, { stars: starsText(best) }) : ''),
+            }),
+          ]),
         ]),
       );
     });
-    box.appendChild(grid);
+    sheet.addEventListener('wheel', function (e) {
+      e.stopPropagation();
+    });
+    return sheet;
+  }
+
+  /* ---------------------------------------------------------- partners */
+
+  function relationBox(p) {
+    var r = partners()[p.code];
+    if (!r) return null;
+    var st = relStage(r);
+    return el('div.pvzx-msec', null, [el('h4', { text: L(TXT.tabPartners) }), relationInfo(r, st)]);
+  }
+
+  function relationInfo(r, st) {
+    var next = st < 2 ? STAGE_XP[st + 1] : 0;
+    var pct = st >= 2 ? 100 : Math.max(0, Math.min(100, ((r.xp - STAGE_XP[st]) / (next - STAGE_XP[st])) * 100));
+    return el('div.pvzx-rel', null, [
+      el('span', { text: stageLabel(st) + ' · ' + L(TXT.stageBonus, { txt: L(STAGES[st].bonus) }) }),
+      el('div.pvzx-xp', null, [el('i', { style: 'width:' + pct + '%' })]),
+      el('small', { text: st === 3 ? L(TXT.xpMax) : st === 2 ? L(TXT.xpWedding) : L(TXT.xpNext, { xp: r.xp, next: next, stage: L(STAGES[st + 1].name) }) }),
+    ]);
+  }
+
+  function partnersTab(body) {
+    var ps = partners();
+    var codes = Object.keys(ps).sort(function (a, b) {
+      return relStage(ps[b]) - relStage(ps[a]) || ps[b].xp - ps[a].xp;
+    });
+    var gf = X.store.get('matchGiftFood', 0);
+    var box = el('div.pvzx-mlikes', null, [
+      el('h3', { text: '💍 ' + L(TXT.partnersTitle) }),
+      el('p.pvzx-small', { text: L(TXT.partnersDesc) }),
+      codes.length ? el('div.pvzx-best', { text: L(TXT.relPoints, { n: couplePoints(ps) }) + (gf ? ' · ' + L(TXT.giftPending, { n: gf }) : '') }) : null,
+    ]);
+    if (!codes.length) box.appendChild(el('p.pvzx-mempty', { text: L(TXT.partnersNone) }));
+    codes.forEach(function (code) {
+      var p = prof(code);
+      if (!p) return;
+      var r = ps[code];
+      var st = relStage(r);
+      var dates = Object.keys(r.dates)
+        .map(function (id) {
+          var dt = DATE_TYPES.find(function (d) {
+            return d.id === id;
+          });
+          return dt ? dt.icon + ' ' + starsText(r.dates[id]) : '';
+        })
+        .join('  ');
+      box.appendChild(
+        el('div.pvzx-prow', null, [
+          avatarNode(p),
+          el('div.pvzx-prow-info', null, [
+            el('b', { text: p.name }),
+            relationInfo(r, st),
+            el('small', { text: L(TXT.since, { d: new Date(r.since).toLocaleDateString() }) + (dates ? ' · ' + dates : '') }),
+            el('div.pvzx-pbtns', null, giftButtons(code, r).concat([
+              el('button.mp-btn.mp-small.mp-blue', { text: L(TXT.chatBtn), onclick: function () {
+                view.tab = 'messages';
+                view.chat = p;
+                render();
+              } }),
+              el('button.mp-btn.mp-small.mp-green', { text: L(TXT.dateBtn), onclick: function () {
+                openDates(p);
+              } }),
+            ])),
+          ]),
+        ]),
+      );
+    });
+    box.addEventListener('wheel', function (e) {
+      e.stopPropagation();
+    });
+    body.appendChild(box);
+  }
+
+  /* ------------------------------------------------------------ social */
+
+  function plantRows(list, unit) {
+    return el(
+      'div.pvzx-poplist',
+      null,
+      list.map(function (e, i) {
+        var art = MP.cards && MP.cards.plantCanvas(e.code);
+        return el('div.pvzx-poprow', null, [
+          el('span.pvzx-poprank', { text: '#' + (i + 1) }),
+          art ? el('img', { src: art.toDataURL(), alt: '' }) : el('span'),
+          el('b', { text: X.plantName(e.code) }),
+          el('span', { text: e.n + ' ' + unit }),
+        ]);
+      }),
+    );
+  }
+
+  function socialTab(body) {
+    var wk = week();
+    var famName = t('family_' + wk.fam.toLowerCase());
+    var box = el('div.pvzx-mlikes.pvzx-social');
+    var evTeam = round.matches.filter(function (m) {
+      return m.event;
+    }).length;
+    box.appendChild(
+      el('div.pvzx-event', null, [
+        el('b', { text: '🎉 ' + L(TXT.weekTitle, { fam: famName }) }),
+        el('p', { text: L(TXT.weekDesc, { fam: famName }) }),
+        round.matches.length ? el('small', { text: L(TXT.weekTeam, { n: evTeam }) }) : null,
+      ]),
+    );
+
+    // Most popular plants of every player on the server.
+    if (!X.api.available()) box.appendChild(el('p.pvzx-small', { text: L(TXT.popOffline) }));
+    else {
+      loadPopular();
+      var pop = social.pop || {};
+      box.appendChild(el('h4', { text: L(TXT.popLikes) }));
+      box.appendChild(pop.like && pop.like.length ? plantRows(pop.like.slice(0, 5), '♥') : el('p.pvzx-small', { text: social.pop ? L(TXT.popNone) : '…' }));
+      if (pop.partner && pop.partner.length) {
+        box.appendChild(el('h4', { text: L(TXT.popPartners) }));
+        box.appendChild(plantRows(pop.partner.slice(0, 5), '💍'));
+      }
+    }
+    var mine = X.store.get('matchMine', {});
+    var mineList = Object.keys(mine)
+      .map(function (c) {
+        return { code: c, n: (mine[c].like || 0) + (mine[c].super || 0) };
+      })
+      .filter(function (e) {
+        return e.n > 0;
+      })
+      .sort(function (a, b) {
+        return b.n - a.n;
+      })
+      .slice(0, 5);
+    if (mineList.length) {
+      box.appendChild(el('h4', { text: L(TXT.popMine) }));
+      box.appendChild(plantRows(mineList, '♥'));
+    }
+
+    // Rankings: levels, couples, this week's theme.
+    if (X.api.available()) {
+      box.appendChild(el('h4', { text: L(TXT.rankings) }));
+      box.appendChild(
+        el(
+          'div.pvzx-chips',
+          null,
+          [
+            ['couple', L(TXT.rankCouple)],
+            ['match', L(TXT.rankMatch)],
+            ['week', L(TXT.rankWeek)],
+          ].map(function (b) {
+            return el('button.pvzx-chip.pvzx-chip-btn' + (social.rank === b[0] ? '.pvzx-on' : ''), { text: b[1], onclick: function () {
+              social.rank = b[0];
+              render();
+            } });
+          }),
+        ),
+      );
+      loadRank(social.rank);
+      var rk = social.ranks[rankBoard(social.rank)] || {};
+      if (!rk.list) box.appendChild(el('p.pvzx-small', { text: '…' }));
+      else if (!rk.list.length) box.appendChild(el('p.pvzx-small', { text: L(TXT.rankEmpty) }));
+      else {
+        box.appendChild(
+          el(
+            'div.pvzx-poplist',
+            null,
+            rk.list.map(function (e) {
+              var d = e.details || {};
+              var extra = d.plant ? X.plantName(d.plant) + (d.rel !== '' && d.rel != null && STAGES[+d.rel] ? ' ' + STAGES[+d.rel].icon : '') : d.waves ? d.waves + ' 🌊' : '';
+              return el('div.pvzx-poprow', null, [el('span.pvzx-poprank', { text: '#' + e.rank }), el('b', { text: e.name }), el('span', { text: extra }), el('span', { text: String(e.score) })]);
+            }),
+          ),
+        );
+      }
+      if (rk.me) box.appendChild(el('p.pvzx-small', { text: L(TXT.rankYou, { n: rk.me.rank }) }));
+      if (!X.api.loggedIn()) box.appendChild(el('p.pvzx-small', { text: L(TXT.rankLogin) }));
+    }
+
+    // Share the team / play a friend's.
+    var team = round.matches.length
+      ? round.matches.map(function (m) {
+          return m.code;
+        })
+      : X.store.get('matchLastTeam', []);
+    box.appendChild(el('h4', { text: L(TXT.shareTitle) }));
+    if (team.length) {
+      var names = team.map(function (c) {
+        return X.plantName(c);
+      }).join(', ');
+      box.appendChild(el('p.pvzx-small', { text: L(TXT.lastTeam, { names: names }) }));
+      box.appendChild(
+        el('button.mp-btn.mp-small.mp-blue', { text: L(TXT.shareTeam), onclick: function () {
+          copyText(L(TXT.shareText, { names: names, code: teamCode(team) }));
+        } }),
+      );
+    } else box.appendChild(el('p.pvzx-small', { text: L(TXT.shareNone) }));
+    var input = el('input.pvzx-import', { type: 'text', placeholder: L(TXT.importPh), spellcheck: false });
+    input.addEventListener('keydown', function (e) {
+      e.stopPropagation();
+    });
+    box.appendChild(el('h4', { text: L(TXT.importTitle) }));
+    box.appendChild(
+      el('div.pvzx-import-row', null, [
+        input,
+        el('button.mp-btn.mp-small.mp-green', { text: L(TXT.importGo), onclick: function () {
+          var codes = parseTeamCode(input.value);
+          if (!codes) {
+            if (MP.ui) MP.ui.toast(L(TXT.importBad), 'bad');
+            return;
+          }
+          playTeam(codes, { sun: 0, food: 0 }, { shared: true });
+        } }),
+      ]),
+    );
+    box.addEventListener('wheel', function (e) {
+      e.stopPropagation();
+    });
     body.appendChild(box);
   }
 
@@ -1361,6 +2163,7 @@
     ['messages', '💬', TXT.tabMessages],
     ['likes', '💛', TXT.tabLikes],
     ['partners', '💍', TXT.tabPartners],
+    ['social', '🌍', TXT.tabSocial],
   ];
 
   function render() {
@@ -1383,7 +2186,8 @@
       ]),
     );
     var body = el('div.pvzx-mbody');
-    ({ discover: discoverTab, messages: messagesTab, likes: likesTab, partners: partnersTab }[view.tab] || discoverTab)(body);
+    ({ discover: discoverTab, messages: messagesTab, likes: likesTab, partners: partnersTab, social: socialTab }[view.tab] || discoverTab)(body);
+    if (view.datePick) body.appendChild(datePicker(view.datePick));
     phone.appendChild(body);
     var b = levelBonus();
     phone.appendChild(
@@ -1396,8 +2200,8 @@
       ]),
     );
     if (b.sun || b.food) phone.appendChild(el('div.pvzx-mbonus', { text: L(TXT.bonus, b) }));
-    var unread = round.matches.filter(function (m) {
-      return round.chats[m.code] && round.chats[m.code].unread;
+    var unread = chatCodes().filter(function (c) {
+      return chats[c] && chats[c].unread;
     }).length;
     var likesPending = round.cards.slice(round.i).filter(function (c) {
       return c.likedYou;
@@ -1413,6 +2217,7 @@
             view.prefs = false;
             view.viewing = null;
             view.chat = null;
+            view.datePick = null;
             render();
           } }, [el('span', { text: tb[1] }), el('small', { text: L(tb[2]) }), count ? el('i', { text: String(count) }) : null]);
         }),
@@ -1436,7 +2241,7 @@
         el('button.mp-btn.mp-blue', { text: '💬 ' + L(TXT.tabMessages), onclick: function () {
           view.tab = 'messages';
           view.chat = p;
-          round.chats[p.code].unread = false;
+          getChat(p.code).unread = false;
           render();
         } }),
         el('button.mp-btn.mp-green', { text: t('match_keep'), onclick: function () {
@@ -1452,7 +2257,7 @@
     if (!node) return;
     var k = e.key;
     var p = current();
-    var disc = view.tab === 'discover' && !view.prefs && !view.viewing;
+    var disc = view.tab === 'discover' && !view.prefs && !view.viewing && !view.datePick;
     if (k === 'ArrowLeft' && disc) decide('nope');
     else if (k === 'ArrowRight' && disc) decide('like');
     else if (k === 'ArrowUp' && disc) decide('super');
@@ -1464,7 +2269,10 @@
       view.expanded = !view.expanded;
       render();
     } else if (k === 'Escape') {
-      if (view.viewing || view.prefs || view.chat) {
+      if (view.datePick) {
+        view.datePick = null;
+        render();
+      } else if (view.viewing || view.prefs || view.chat) {
         view.viewing = null;
         view.prefs = false;
         view.chat = null;
@@ -1512,6 +2320,8 @@
     document.body.classList.remove('pvzx-open');
     if (cam && cam.root.isValid) cam.root.destroy();
     cam = null;
+    view.datePick = null;
+    flushStats();
   };
 
   /* ------------------------------------------------------------- levels */
@@ -1540,31 +2350,56 @@
 
   function play() {
     if (!round || !round.matches.length) return;
-    var stage = X.STAGE_IDS[Math.floor(Math.random() * X.STAGE_IDS.length)];
     var b = levelBonus();
-    var lv = baseLevel(stage, 15, 150 + b.sun);
-    lv.def.Name = t('mode_match');
-    lv.def.Description = t('mode_match_desc');
     var team = round.matches.map(function (m) {
       return m.code;
     });
+    jealousy(team);
+    X.store.set('matchGiftFood', 0);
+    X.store.set('matchLastTeam', team);
+    playTeam(team, b, {});
+  }
+
+  // A Plant Match level with this team (also a friend's shared team).
+  function playTeam(team, b, extra) {
+    var stage = X.STAGE_IDS[Math.floor(Math.random() * X.STAGE_IDS.length)];
+    var lv = baseLevel(stage, 15, 150 + b.sun);
+    lv.def.Name = t('mode_match');
+    lv.def.Description = t('mode_match_desc');
     setSeeds(lv.objects, team);
+    var fam = week().fam;
+    var evCount = team.filter(function (c) {
+      return famOf(c) === fam;
+    }).length;
+    flushStats();
     M.close();
-    X.modes.current = { kind: 'match', id: 'match', options: { stage: stage, team: team, food: b.food }, mutators: X.mutators ? X.mutators.chosen() : [] };
+    X.modes.current = { kind: 'match', id: 'match', options: { stage: stage, team: team, food: b.food, shared: !!extra.shared, event: evCount }, mutators: X.mutators ? X.mutators.chosen() : [] };
     G.startCustomLevel(lv.objects);
     round = null;
   }
 
-  // A short level alone with one match.
-  function date(p) {
-    var stage = STAGE_OF_WORLD[p.worldKey] || pick(X.STAGE_IDS);
-    var lv = baseLevel(stage, 6, 300, 'fast');
-    lv.def.Name = L(TXT.dateName, { name: p.name });
-    lv.def.Description = L(TXT.inviteDesc, { name: p.name });
+  // A friend for the double date: another plant of the same family.
+  function friendOf(p) {
+    var same = shuffle(MP.allPlants().slice()).find(function (c) {
+      return c !== p.code && famOf(c) === p.family && MP.cards.plantCanvas(c);
+    });
+    return same || pick(MP.allPlants().filter(function (c) {
+      return c !== p.code;
+    }));
+  }
+
+  // A short level with one match: the kind of date sets the arena, waves
+  // and modifiers; up to 3 stars from its objectives.
+  function date(p, dt) {
+    dt = dt || DATE_TYPES[0];
+    var stage = dt.stage || STAGE_OF_WORLD[p.worldKey] || pick(X.STAGE_IDS);
+    var lv = baseLevel(stage, dt.waves, dt.sun, dt.rate);
+    lv.def.Name = dt.icon + ' ' + L(TXT.dateName, { name: p.name });
+    lv.def.Description = L(DATES[dt.id].desc);
     var wm = lv.objects.find(function (o) {
       return o.objclass === 'WaveManagerProperties';
     });
-    wm.objdata.FlagWaveInterval = 3;
+    wm.objdata.FlagWaveInterval = dt.waves >= 10 ? 5 : dt.waves >= 8 ? 4 : 3;
     var dyn = lv.objects.find(function (o) {
       return o.objclass === 'WaveManagerModuleProperties';
     });
@@ -1572,9 +2407,22 @@
       z.PointIncrementPerWave = Math.round(z.PointIncrementPerWave * 0.6);
       z.StartingPoints = Math.round(z.StartingPoints * 0.6);
     });
-    setSeeds(lv.objects, [p.code]);
+    var team = [p.code];
+    if (dt.friend) team.push(friendOf(p));
+    if (dt.guests) {
+      shuffle(Object.keys(partners()))
+        .filter(function (c) {
+          return c !== p.code;
+        })
+        .slice(0, 4)
+        .forEach(function (c) {
+          team.push(c);
+        });
+    }
+    setSeeds(lv.objects, team);
+    flushStats();
     M.close();
-    X.modes.current = { kind: 'matchdate', id: 'matchdate', options: { stage: stage, plant: p.code, name: p.name }, mutators: [] };
+    X.modes.current = { kind: 'matchdate', id: 'matchdate', options: { stage: stage, plant: p.code, name: p.name, type: dt.id, team: team }, mutators: dt.mut.slice() };
     G.startCustomLevel(lv.objects);
   }
 
@@ -1587,44 +2435,128 @@
     } catch (e) {}
   }
 
+  function note(text, cls, delay) {
+    setTimeout(function () {
+      if (X.play && X.play.summaryNote) X.play.summaryNote(text, cls);
+    }, delay || 1300);
+  }
+
+  function dateEnded(cur, s) {
+    s.mode = 'matchdate';
+    var dt =
+      DATE_TYPES.find(function (d) {
+        return d.id === cur.options.type;
+      }) || DATE_TYPES[0];
+    var code = cur.options.plant;
+    var name = cur.options.name;
+    if (s.result !== 'won') {
+      pushMsg(code, 'them', Lp(CHAT.dateLostMsg));
+      note(L(TXT.dateLost));
+      return;
+    }
+    var stars = 1;
+    dt.obj.forEach(function (o) {
+      if (OBJ[o].ok(s)) stars++;
+    });
+    var ps = partners();
+    var fresh = !ps[code];
+    if (fresh) ps[code] = { since: Date.now(), xp: 0, dates: {} };
+    var r = ps[code];
+    var before = fresh ? -1 : relStage(r);
+    r.dates[dt.id] = Math.max(r.dates[dt.id] || 0, stars);
+    if (dt.id === 'wedding') r.married = true;
+    savePartners(ps);
+    pushMsg(code, 'them', Lp(CHAT.dateWonMsg));
+    statEvent(code, 'date');
+    if (fresh) statEvent(code, 'partner');
+    if (dt.id === 'wedding') {
+      statEvent(code, 'wed');
+      unlock(['match_married']);
+    }
+    // xp after the wedding flag: the stage messages come from the change.
+    addXp(code, stars);
+    if (dt.id === 'wedding' && !fresh) stageMessages(code, before, 3);
+    X.store.set('matchReveals', reveals() + 1);
+    if (stars === 3) {
+      X.store.set('matchSupers', X.store.get('matchSupers', 0) + 1);
+      unlock(['match_stars']);
+    }
+    note(L(TXT.dateResult, { icon: dt.icon, date: L(DATES[dt.id].name), stars: starsText(stars) }), 'pvzx-good');
+    note(
+      [L(TXT.objWin)]
+        .concat(dt.obj.map(function (o) {
+          return (OBJ[o].ok(s) ? '✔ ' : '✘ ') + OBJ[o].text();
+        }))
+        .join(' · '),
+      '',
+      1400,
+    );
+    if (fresh) note(L(TXT.dateWon, { name: name }), 'pvzx-good', 1500);
+  }
+
+  function matchEnded(cur, s) {
+    s.mode = 'match';
+    var team = cur.options.team;
+    s.matchTeam = team.length;
+    s.score = X.modes.score(s);
+    X.store.set('matchBest', Math.max(X.store.get('matchBest', 0), s.score));
+    var won = s.result === 'won';
+    var ps = partners();
+    // Messages after the level: partners in the team and a couple more.
+    var others = shuffle(
+      team.filter(function (c) {
+        return !ps[c];
+      }),
+    ).slice(0, 2);
+    team.forEach(function (code) {
+      var c = getChat(code);
+      c.mem.levels++;
+      if (won) c.mem.wins++;
+      if (ps[code] || others.indexOf(code) >= 0) pushMsg(code, 'them', Lp(won ? CHAT.afterWin : CHAT.afterLoss, { kills: s.kills || 0 }));
+      if (ps[code] && won) addXp(code, 1);
+    });
+    saveChats();
+    var wk = week();
+    var themed = won && !cur.options.shared && cur.options.event >= 3;
+    if (won && !cur.options.shared) {
+      M.reward();
+      if (themed) {
+        M.reward();
+        unlock(['match_event']);
+        note(L(TXT.weekReward), 'pvzx-good');
+      }
+      note(L(TXT.reward), 'pvzx-good');
+    }
+    if (X.api.available() && X.api.loggedIn()) {
+      var details = { waves: s.wave, kills: s.kills, time: Math.round(s.time), plants: s.matchTeam, stage: cur.options.stage, team: team.join('.').slice(0, 80) };
+      X.api
+        .postScore('challenge:match', s.score, details)
+        .then(function (r) {
+          if (r.rank) note(t('summary_rank', { n: r.rank }), 'pvzx-good', 1500);
+        })
+        .catch(function () {});
+      if (themed) X.api.postScore('challenge:week-' + wk.n, s.score, details).catch(function () {});
+    }
+  }
+
   function onLevelEnd(s) {
     var cur = X.modes.current;
     if (!cur || s.online) return;
-    if (cur.kind === 'matchdate') {
-      s.mode = 'matchdate';
-      if (s.result === 'won') {
-        var ps = partners();
-        ps[cur.options.plant] = { since: Date.now() };
-        X.store.set('matchPartners', ps);
-        X.store.set('matchReveals', reveals() + 1);
-      }
-      setTimeout(function () {
-        X.play.summaryNote(s.result === 'won' ? L(TXT.dateWon, { name: cur.options.name }) : L(TXT.dateLost), s.result === 'won' ? 'pvzx-good' : '');
-      }, 1300);
-      return;
-    }
-    if (cur.kind !== 'match') return;
-    s.mode = 'match';
-    s.matchTeam = cur.options.team.length;
-    s.score = X.modes.score(s);
-    X.store.set('matchBest', Math.max(X.store.get('matchBest', 0), s.score));
-    if (s.result === 'won') {
-      M.reward();
-      setTimeout(function () {
-        X.play.summaryNote(L(TXT.reward), 'pvzx-good');
-      }, 1300);
-    }
-    if (X.api.available() && X.api.loggedIn()) {
-      X.api
-        .postScore('challenge:match', s.score, { waves: s.wave, kills: s.kills, time: Math.round(s.time), plants: s.matchTeam, stage: cur.options.stage })
-        .then(function (r) {
-          setTimeout(function () {
-            if (r.rank) X.play.summaryNote(t('summary_rank', { n: r.rank }), 'pvzx-good');
-          }, 1500);
-        })
-        .catch(function () {});
-    }
+    if (cur.kind === 'matchdate') dateEnded(cur, s);
+    else if (cur.kind === 'match') matchEnded(cur, s);
+    else return;
+    flushStats();
   }
+
+  // For tests and the console.
+  M.debug = {
+    chats: function () {
+      return chats;
+    },
+    round: function () {
+      return round;
+    },
+  };
 
   M.best = function () {
     return X.store.get('matchBest', 0);

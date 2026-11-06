@@ -29,7 +29,7 @@ const { ExpressPeerServer } = require('peer');
 const { openStore } = require('./store');
 const auth = require('./auth');
 
-const VERSION = '4.1.0';
+const VERSION = '4.2.0';
 const PORT = Number(process.env.PORT) || 9000;
 const MAX_SAVE = (Number(process.env.MAX_SAVE_MB) || 8) * 1024 * 1024;
 const ORIGINS = (process.env.ALLOWED_ORIGINS || '*')
@@ -180,7 +180,7 @@ function optionalUser(req, res, next) {
 /* ------------------------------------------------------------------- API */
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, version: VERSION, storage: store.kind, features: ['accounts', 'saves', 'rooms', 'matches', 'admin', 'history', 'scores', 'achievements', 'daily', 'branding'] });
+  res.json({ ok: true, version: VERSION, storage: store.kind, features: ['accounts', 'saves', 'rooms', 'matches', 'admin', 'history', 'scores', 'achievements', 'daily', 'branding', 'matchstats'] });
 });
 
 // Accounts ---------------------------------------------------------------
@@ -545,7 +545,7 @@ app.post('/api/scores/:board', limit('scores', 20), requireUser, json, (req, res
   if (!Number.isFinite(score) || score < 0 || score > 1e9) return res.status(400).json({ error: 'bad_score' });
   const d = (req.body && req.body.details) || {};
   const details = {};
-  for (const k of ['waves', 'time', 'kills', 'sun', 'plants', 'stage', 'mutators']) {
+  for (const k of ['waves', 'time', 'kills', 'sun', 'plants', 'stage', 'mutators', 'plant', 'rel', 'team']) {
     if (d[k] != null) details[k] = typeof d[k] === 'number' ? Math.max(0, Math.min(1e9, d[k])) : clean(d[k], 80);
   }
   const r = store.addScore(board, req.user.id, score, details);
@@ -642,6 +642,30 @@ app.put('/api/admin/branding', limit('admin', 60), requireAdmin, json, wrap(asyn
   console.log('[admin] %s changed the branding (%d image(s))', req.user.username, brandingIds(cfg).size);
   res.json({ branding: cfg });
 }));
+
+// Plant Match: anonymous counters of what players do with each plant, to
+// show the most liked / most dated plants of the whole server.
+const MATCH_KINDS = ['like', 'super', 'match', 'date', 'partner', 'wed'];
+const PLANT_CODE = /^[a-z0-9_]{1,40}$/;
+
+app.post('/api/match/stats', limit('matchstats', 12), json, (req, res) => {
+  const ev = (req.body && req.body.events) || {};
+  const events = {};
+  let count = 0;
+  for (const [code, kinds] of Object.entries(typeof ev === 'object' ? ev : {})) {
+    if (!PLANT_CODE.test(code) || !kinds || typeof kinds !== 'object' || ++count > 40) continue;
+    for (const kind of MATCH_KINDS) {
+      const n = Math.floor(Number(kinds[kind]));
+      if (n > 0) (events[code] = events[code] || {})[kind] = Math.min(n, 10);
+    }
+  }
+  store.addMatchStats(events);
+  res.json({ ok: true });
+});
+
+app.get('/api/match/stats', limit('rooms', 120), (req, res) => {
+  res.json({ top: store.topMatchStats(MATCH_KINDS, Math.min(30, Number(req.query.limit) || 10)) });
+});
 
 const ACHIEVEMENT = /^[a-z0-9_]{2,40}$/;
 
