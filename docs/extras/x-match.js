@@ -55,7 +55,7 @@
   I.round = null;
   I.node = null;
   I.view = { tab: 'discover', photo: 0, expanded: false, prefs: false, viewing: null, chat: null };
-  M.prefs = X.store.get('matchPrefs', { families: [], maxCost: 0, sun: true });
+  M.prefs = Object.assign({ families: [], maxCost: 0, sun: true, me: '', show: 'all' }, X.store.get('matchPrefs', {}));
 
   /* ------------------------------------------------------------ helpers */
 
@@ -132,6 +132,7 @@
   var PERS = MT.PERS;
   var DATES = MT.DATES;
   var STAGES = MT.STAGES;
+  var TRAITS = MT.TRAITS;
 
   /* ---------------------------------------------- persistent counters */
 
@@ -257,6 +258,7 @@
       partner: !!I.partners()[code],
     };
     p.roles = I.rolesOf(p);
+    I.traits(p);
     var persKeys = Object.keys(PERS);
     p.pers = persKeys[X.hashSeed('pers:' + code) % persKeys.length];
     p.event = p.family === I.week().fam;
@@ -269,10 +271,10 @@
     p.badges = [];
     if (p.partner) p.badges.push(L(TXT.badgePartner));
     if (p.event) p.badges.push(L(TXT.weekBadge));
-    p.badges.push(PERS[p.pers].icon + ' ' + L(PERS[p.pers].name));
-    if (CLASSIC_WORLDS[w]) p.badges.push(L(TXT.badgeVerified));
-    if (cost >= 300) p.badges.push(L(TXT.badgeLegend));
-    if (NEW_WORLDS[w]) p.badges.push(L(TXT.badgeNew));
+    p.badges.push(PERS[p.pers].icon + ' ' + I.gfix(L(PERS[p.pers].name), p.gender));
+    if (CLASSIC_WORLDS[w]) p.badges.push(I.gfix(L(TXT.badgeVerified), p.gender));
+    if (cost >= 300) p.badges.push(I.gfix(L(TXT.badgeLegend), p.gender));
+    if (NEW_WORLDS[w]) p.badges.push(I.gfix(L(TXT.badgeNew), p.gender));
     if (p.likedYou) p.badges.push(L(TXT.badgePopular));
     return p;
   };
@@ -286,8 +288,8 @@
     for (var i = 0; i < codes.length && cards.length < DECK; i++) {
       var p = I.profile(codes[i]);
       if (!p) continue;
-      var ok = (!prefs.families.length || prefs.families.indexOf(p.family) >= 0) && (!prefs.maxCost || p.cost <= prefs.maxCost);
-      if (p.roles.sun && !sunSpare) sunSpare = p;
+      var ok = (!prefs.families.length || prefs.families.indexOf(p.family) >= 0) && (!prefs.maxCost || p.cost <= prefs.maxCost) && (prefs.show === 'all' || !prefs.show || p.gender === prefs.show);
+      if (p.roles.sun && !sunSpare && (prefs.show === 'all' || !prefs.show || p.gender === prefs.show)) sunSpare = p;
       if (!ok) continue;
       if (p.roles.sun) sunSeen = true;
       cards.push(p);
@@ -310,7 +312,7 @@
       return c.event;
     }).length;
     for (var k = 0; k < codes.length && evCount < 5; k++) {
-      if (has(codes[k]) || I.famOf(codes[k]) !== fam) continue;
+      if (has(codes[k]) || I.famOf(codes[k]) !== fam || (prefs.show && prefs.show !== 'all' && I.genderOf(codes[k]) !== prefs.show)) continue;
       var ep = I.profile(codes[k]);
       if (!ep) continue;
       cards.splice(Math.floor(Math.random() * Math.min(16, cards.length + 1)), 0, ep);
@@ -342,6 +344,90 @@
 
   I.ROLE_ORDER = ['sun', 'defense', 'attack', 'area', 'support'];
 
+  /* ------------------------------------------------------------- traits */
+
+  // Traits of a plant: fixed per plant (the same for every player), from
+  // a hash of its code.
+  I.trait = function trait(code, key, n) {
+    return X.hashSeed('trait:' + key + ':' + code) % n;
+  };
+
+  I.genderOf = function genderOf(code) {
+    var g = I.trait(code, 'gender', 20);
+    return g < 9 ? 'f' : g < 18 ? 'm' : 'n';
+  };
+
+  I.traits = function traits(p) {
+    var c = p.code;
+    p.gender = I.genderOf(c);
+    var it = I.trait(c, 'interest', 20);
+    p.interest = it < 8 ? 'all' : it < 14 ? (p.gender === 'm' ? 'f' : 'm') : it < 19 ? p.gender === 'n' ? 'all' : p.gender : 'n';
+    p.sign = I.trait(c, 'sign', 12);
+    p.height = 12 + I.trait(c, 'height', 70) + Math.round(Math.min(40, p.toughness / 200));
+    var jobs = TRAITS.jobs[I.mainRole(p)] || TRAITS.jobs.support;
+    p.job = jobs[I.trait(c, 'job', jobs.length)];
+    p.dish = TRAITS.foods[I.trait(c, 'food', TRAITS.foods.length)];
+    p.music = TRAITS.music[I.trait(c, 'music', TRAITS.music.length)];
+    p.pet = TRAITS.pets[I.trait(c, 'pet', TRAITS.pets.length)];
+    p.kids = TRAITS.kids[I.trait(c, 'kids', TRAITS.kids.length)];
+    var loves = Object.keys(TRAITS.love);
+    p.love = loves[I.trait(c, 'love', loves.length)];
+  };
+
+  // Does the plant look for someone like the player (their gender, if set)?
+  I.seeksYou = function seeksYou(p) {
+    var me = M.prefs.me;
+    return !me || !p.interest || p.interest === 'all' || p.interest === me;
+  };
+
+  // {g:fem|masc|neutral} by the plant's gender, {u:…} by the player's.
+  I.gfix = function gfix(text, g) {
+    var pick3 = function (who) {
+      return function (_, a, b, c) {
+        return who === 'f' ? a : who === 'n' ? c : b;
+      };
+    };
+    return String(text == null ? '' : text)
+      .replace(/\{g:([^|}]*)\|([^|}]*)\|([^}]*)\}/g, pick3(g || 'f'))
+      .replace(/\{u:([^|}]*)\|([^|}]*)\|([^}]*)\}/g, pick3(M.prefs.me || 'm'));
+  };
+
+  // Rows of the "Basics" section: [icon, label, value].
+  I.traitRows = function traitRows(p) {
+    var T = TRAITS;
+    var gx = function (o) {
+      return I.gfix(L(o), p.gender);
+    };
+    var sign = T.signs[p.sign];
+    var love = T.love[p.love];
+    return [
+      [T.gender[p.gender].icon, L(T.labels.gender), L(T.gender[p.gender])],
+      ['🔎', L(T.labels.lookingFor), L(T.interest[p.interest])],
+      [sign.icon, L(T.labels.sign), L(sign)],
+      ['📏', L(T.labels.height), L(TXT.cm, { n: p.height })],
+      ['💼', L(T.labels.job), gx(p.job)],
+      ['🍽', L(T.labels.food), L(p.dish)],
+      ['🎵', L(T.labels.music), L(p.music)],
+      ['🐾', L(T.labels.pet), L(p.pet)],
+      ['🌱', L(T.labels.kids), gx(p.kids)],
+      ['🥤', L(T.labels.drinks), L(T.drinks)],
+      ['🚭', L(T.labels.smokes), L(T.smokes)],
+      [love.icon, L(T.labels.love), L(love) + ' (' + L(love.desc) + ')'],
+    ];
+  };
+
+  // Short line on the card: gender, sign, height, job.
+  I.traitLine = function traitLine(p) {
+    var T = TRAITS;
+    return [T.gender[p.gender].icon + ' ' + L(T.gender[p.gender]), T.signs[p.sign].icon + ' ' + L(T.signs[p.sign]), '📏 ' + L(TXT.cm, { n: p.height }), '💼 ' + I.gfix(L(p.job), p.gender)].join(' · ');
+  };
+
+  // A love language that matches what happened is worth one more point.
+  I.loveBonus = function loveBonus(code, kind) {
+    var p = I.profCache[code] || I.prof(code);
+    return p && p.love === kind ? 1 : 0;
+  };
+
   I.compatibility = function compatibility(p) {
     if (p._compat && p._compatFor === I.round.matches.length) return p._compat;
     var have = {};
@@ -366,8 +452,10 @@
       score -= 18;
       reason = 'match_why_many';
     }
+    var seeks = I.seeksYou(p);
+    if (!seeks) score -= 20;
     if (p.partner) score = Math.max(score, 95);
-    p._compat = { score: Math.max(12, Math.min(99, score)), reason: reason };
+    p._compat = { score: Math.max(12, Math.min(99, score)), reason: reason, seek: seeks ? '' : L(TRAITS.labels.notYou, { who: L(TRAITS.interest[p.interest]) }) };
     p._compatFor = I.round.matches.length;
     return p._compat;
   };

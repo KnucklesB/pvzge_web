@@ -14,7 +14,7 @@
 
   var MP = window.PvZMP;
   var X = (window.PvZX = new MP.Emitter());
-  X.VERSION = '2.1.0';
+  X.VERSION = '2.2.0';
 
   /* ------------------------------------------------------------ storage */
 
@@ -1112,6 +1112,39 @@
     },
     postScore: function (board, score, details) {
       return api.request('POST', '/scores/' + encodeURIComponent(board), { score: score, details: details || {} });
+    },
+    // Plant Match players: profiles and private messages.
+    matchMe: function () {
+      return api.request('GET', '/match/me').then(function (r) {
+        return r.profile;
+      });
+    },
+    putMatchProfile: function (p) {
+      return api.request('PUT', '/match/profile', p).then(function (r) {
+        return r.profile;
+      });
+    },
+    matchPlayers: function () {
+      return api.request('GET', '/match/players').then(function (r) {
+        return r.players || [];
+      });
+    },
+    dms: function (after) {
+      return api.request('GET', '/match/dm?after=' + (after || 0));
+    },
+    sendDm: function (to, text) {
+      return api.request('POST', '/match/dm', { to: to, text: text }).then(function (r) {
+        return r.message;
+      });
+    },
+    readDms: function (name) {
+      return api.request('POST', '/match/dm/read', { with: name });
+    },
+    blockPlayer: function (name, block) {
+      return api.request('POST', '/match/block', { name: name, block: block !== false });
+    },
+    reportPlayer: function (name, reason, excerpt) {
+      return api.request('POST', '/match/report', { name: name, reason: reason, excerpt: excerpt || '' });
     },
     matchState: function () {
       return api.request('GET', '/match/state');

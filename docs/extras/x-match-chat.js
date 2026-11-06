@@ -24,6 +24,7 @@
   var PERS = MT.PERS;
   var DATES = MT.DATES;
   var STAGES = MT.STAGES;
+  var TRAITS = MT.TRAITS;
   var fill = I.fill;
   var L = I.L;
   var Lp = I.Lp;
@@ -89,7 +90,7 @@
 
   I.pushMsg = function pushMsg(code, from, text, kind) {
     var c = I.getChat(code);
-    var m = { from: from, text: text, t: Date.now() };
+    var m = { from: from, text: I.gfix(text, I.genderOf(code)), t: Date.now() };
     if (kind) m.k = kind;
     c.msgs.push(m);
     if (from !== 'me' && !I.viewingChat(code)) {
@@ -460,9 +461,11 @@
   // Unread chats (for the menu badge).
   M.unread = function () {
     var ps = I.partners();
-    return Object.keys(I.chats).filter(function (c) {
-      return I.chats[c].unread && (ps[c] || I.inRound({ code: c }) || I.chats[c].msgs.length);
-    }).length;
+    return (
+      Object.keys(I.chats).filter(function (c) {
+        return I.chats[c].unread && (ps[c] || I.inRound({ code: c }) || I.chats[c].msgs.length);
+      }).length + (I.pmUnread ? I.pmUnread() : 0)
+    );
   };
 
   /* --------------------------------------------- partners: daily check-in */
@@ -516,7 +519,7 @@
     var r = I.partners()[p.code];
     if (data.q === 'good') {
       I.pushMsg(p.code, 'them', Lp(pers.good));
-      if (r) I.addXp(p.code, 1);
+      if (r) I.addXp(p.code, 1 + I.loveBonus(p.code, 'words'));
     } else if (data.q === 'bad') {
       I.pushMsg(p.code, 'them', Lp(pers.bad));
       if (r && I.relStage(r) >= 1) I.addXp(p.code, -1);
@@ -618,7 +621,7 @@
     X.store.set('matchPartners', ps);
     I.pushMsg(code, 'me', kind === 'water' ? '💧' : '🍫', 'sticker');
     I.later(code, Lp(CHAT.giftThanks), 1500 + Math.random() * 2500);
-    I.addXp(code, kind === 'water' ? 1 : 2);
+    I.addXp(code, (kind === 'water' ? 1 : 2) + I.loveBonus(code, 'gifts'));
     if (ps[code] && Math.random() < 0.3) {
       var name = X.plantName(code);
       if (Math.random() < 0.5 && X.store.get('matchGiftFood', 0) < 3) {

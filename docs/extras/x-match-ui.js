@@ -24,6 +24,7 @@
   var PERS = MT.PERS;
   var DATES = MT.DATES;
   var STAGES = MT.STAGES;
+  var TRAITS = MT.TRAITS;
   var fill = I.fill;
   var L = I.L;
   var Lp = I.Lp;
@@ -79,7 +80,8 @@
     }
     if (kind !== 'nope') {
       I.statEvent(p.code, kind === 'super' ? 'super' : 'like');
-      var chance = Math.min(0.97, p.chance * (0.7 + I.compatibility(p).score / 160));
+      // Plants that look for someone else are harder to match.
+      var chance = Math.min(0.97, p.chance * (0.7 + I.compatibility(p).score / 160) * (I.seeksYou(p) ? 1 : 0.45));
       matched = kind === 'super' || p.likedYou || p.partner || Math.random() < chance;
       if (matched) {
         I.round.matches.push(p);
@@ -274,7 +276,7 @@
     if (p.arming) sheet.push([t('match_stat_arming'), p.arming + 's']);
     if (p.duration) sheet.push([t('match_stat_duration'), p.duration + 's']);
     return el('div.pvzx-mdetails', null, [
-      el('div.pvzx-compat', null, [el('b', { text: '💚 ' + t('match_compat', { n: compat.score }) }), el('span', { text: t(compat.reason) })]),
+      el('div.pvzx-compat', null, [el('b', { text: '💚 ' + t('match_compat', { n: compat.score }) }), el('span', { text: t(compat.reason) }), compat.seek ? el('span.pvzx-seek', { text: compat.seek }) : null]),
       el('p.pvzx-headline', { text: '“' + p.headline + '”' }),
       p.bio ? el('div.pvzx-msec', null, [el('h4', { text: t('match_about') }), el('p.pvzx-hand', { text: '“' + p.bio + '”' })]) : null,
       p.intro ? el('div.pvzx-msec', null, [el('h4', { text: t('match_ability') }), el('p', { text: p.intro })]) : null,
@@ -296,6 +298,16 @@
           null,
           sheet.map(function (r) {
             return el('tr', null, [el('td', { text: r[0] }), el('td', { text: String(r[1]) })]);
+          }),
+        ),
+      ]),
+      el('div.pvzx-msec', null, [
+        el('h4', { text: L(TRAITS.labels.basics) }),
+        el(
+          'table.pvzx-sheet',
+          null,
+          I.traitRows(p).map(function (r) {
+            return el('tr', null, [el('td', { text: r[0] + ' ' + r[1] }), el('td', { text: r[2] })]);
           }),
         ),
       ]),
@@ -348,7 +360,8 @@
       I.nameRow(p, top),
       I.badges(p),
       el('div.pvzx-mcard-meta', { text: '📍 ' + p.world + ' · ' + t('match_distance', { n: p.distance }) }),
-      top ? el('div.pvzx-compat-mini', { text: '💚 ' + t('match_compat', { n: I.compatibility(p).score }) + ' · ' + t(I.compatibility(p).reason) }) : null,
+      el('div.pvzx-mcard-meta', { text: I.traitLine(p) }),
+      top ? el('div.pvzx-compat-mini' + (I.compatibility(p).seek ? '.pvzx-seek' : ''), { text: '💚 ' + t('match_compat', { n: I.compatibility(p).score }) + ' · ' + (I.compatibility(p).seek || t(I.compatibility(p).reason)) }) : null,
       I.chips(p),
       !I.view.expanded ? el('div.pvzx-mcard-brief', { text: '“' + p.headline + '”' }) : null,
     ]);
@@ -403,6 +416,18 @@
 
   /* --------------------------------------------------------- the tabs */
 
+  I.choiceChips = function choiceChips(values, current, onPick, label) {
+    return el(
+      'div.pvzx-chips',
+      null,
+      values.map(function (v) {
+        return el('button.pvzx-chip.pvzx-chip-btn' + (current === v ? '.pvzx-on' : ''), { text: label(v), onclick: function () {
+          onPick(v);
+        } });
+      }),
+    );
+  };
+
   I.prefsPanel = function prefsPanel() {
     var pr = M.prefs;
     var save = function () {
@@ -427,6 +452,26 @@
     var costs = [0, 100, 150, 200, 300];
     return el('div.pvzx-mprefs', null, [
       el('h3', { text: '⚙ ' + t('match_prefs') }),
+      el('h4', { text: L(TXT.prefMe) }),
+      el('p.pvzx-small', { text: L(TXT.prefMeTip) }),
+      I.choiceChips(['f', 'm', 'n', ''], pr.me, function (v) {
+        pr.me = v;
+        save();
+        I.round.cards.forEach(function (c) {
+          c._compat = null;
+        });
+        I.render();
+      }, function (v) {
+        return v ? TRAITS.gender[v].icon + ' ' + L(TRAITS.gender[v]) : L(TXT.prefUnset);
+      }),
+      el('h4', { text: L(TXT.prefShow) }),
+      I.choiceChips(['all', 'f', 'm', 'n'], pr.show || 'all', function (v) {
+        pr.show = v;
+        save();
+        I.render();
+      }, function (v) {
+        return v === 'all' ? L(TXT.showAll) : TRAITS.gender[v].icon + ' ' + L(TRAITS.interest[v]);
+      }),
       el('h4', { text: t('match_pref_family') }),
       el('p.pvzx-small', { text: t('match_pref_family_tip') }),
       famBox,
@@ -600,9 +645,15 @@
   };
 
   I.messagesTab = function messagesTab(body) {
+    if (I.view.msgSub === 'players') {
+      if (I.pm.chat) I.playerChat(body, I.pm.chat);
+      else I.playersView(body);
+      return;
+    }
     var p = I.view.chat;
     var ps = I.partners();
     if (!p) {
+      body.appendChild(I.subSwitch());
       var list = el('div.pvzx-mlist');
       var codes = I.chatCodes();
       if (!codes.length) list.appendChild(el('p.pvzx-mempty', { text: L(TXT.msgsEmpty) }));
@@ -676,7 +727,7 @@
       'div.pvzx-chat-opts',
       null,
       I.chatOptions(p, chat).map(function (o) {
-        return el('button.pvzx-chat-opt', { text: o.text, onclick: function () {
+        return el('button.pvzx-chat-opt', { text: I.gfix(o.text, p.gender), onclick: function () {
           I.reply(p, o);
         } });
       }),
@@ -816,6 +867,9 @@
 
   I.render = function render() {
     if (!I.node) return;
+    // Keep the field being typed in (inputs with data-keep) across renders.
+    var act = document.activeElement;
+    var keep = act && I.node.contains(act) && act.getAttribute('data-keep');
     I.node.querySelectorAll('.pvzx-mcard').forEach(function (c) {
       if (c._cleanup) c._cleanup();
     });
@@ -848,9 +902,10 @@
       ]),
     );
     if (b.sun || b.food) phone.appendChild(el('div.pvzx-mbonus', { text: L(TXT.bonus, b) }));
-    var unread = I.chatCodes().filter(function (c) {
-      return I.chats[c] && I.chats[c].unread;
-    }).length;
+    var unread =
+      I.chatCodes().filter(function (c) {
+        return I.chats[c] && I.chats[c].unread;
+      }).length + I.pmUnread();
     var likesPending = I.round.cards.slice(I.round.i).filter(function (c) {
       return c.likedYou;
     }).length;
@@ -872,6 +927,15 @@
       ),
     );
     I.node.replaceChildren(phone);
+    if (keep) {
+      var again = I.node.querySelector('[data-keep="' + keep + '"]');
+      if (again) {
+        again.focus();
+        try {
+          again.setSelectionRange(again.value.length, again.value.length);
+        } catch (e) {}
+      }
+    }
   };
 
   I.LINES = ['match_line1', 'match_line2', 'match_line3', 'match_line4', 'match_line5', 'match_line6'];
@@ -919,6 +983,11 @@
     } else if (k === 'Escape') {
       if (I.view.datePick) {
         I.view.datePick = null;
+        I.render();
+      } else if (I.view.tab === 'messages' && I.view.msgSub === 'players' && (I.pm.chat || I.pm.viewing || I.pm.editing)) {
+        I.pm.chat = null;
+        I.pm.viewing = null;
+        I.pm.editing = false;
         I.render();
       } else if (I.view.viewing || I.view.prefs || I.view.chat) {
         I.view.viewing = null;

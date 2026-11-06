@@ -22,9 +22,9 @@
     noLikes: { pt: 'Suas curtidas de hoje acabaram', en: 'You are out of likes for today', zh: '今天的喜欢次数用完了' },
     noLikesDesc: { pt: 'Volte amanhã, ou vença uma fase do Match de Plantas para ganhar +10 curtidas, 1 superlike e 1 revelação.', en: 'Come back tomorrow, or win a Plant Match level for +10 likes, 1 super like and 1 reveal.', zh: '明天再来，或赢得一局植物配对，获得 +10 喜欢、1 个超级喜欢和 1 次揭晓。' },
     likedYou: { pt: '💛 Curtiu você', en: '💛 Liked you', zh: '💛 喜欢你' },
-    badgeVerified: { pt: '✔ Verificada', en: '✔ Verified', zh: '✔ 已认证' },
-    badgeLegend: { pt: '👑 Lendária', en: '👑 Legendary', zh: '👑 传奇' },
-    badgeNew: { pt: '✨ Nova no app', en: '✨ New here', zh: '✨ 新人' },
+    badgeVerified: { pt: '✔ Verificad{g:a|o|e}', en: '✔ Verified', zh: '✔ 已认证' },
+    badgeLegend: { pt: '👑 Lendári{g:a|o|e}', en: '👑 Legendary', zh: '👑 传奇' },
+    badgeNew: { pt: '✨ Nov{g:a|o|e} no app', en: '✨ New here', zh: '✨ 新人' },
     badgePopular: { pt: '🔥 Popular', en: '🔥 Popular', zh: '🔥 人气' },
     badgePartner: { pt: '💍 Namora você', en: '💍 Your partner', zh: '💍 你的恋人' },
     photoWater: { pt: 'Na piscina', en: 'At the pool', zh: '泳池' },
@@ -85,7 +85,7 @@
     r3: [
       { q: 'good', pt: 'Claro! Já guardei a melhor casa pra você.', en: 'Of course! I saved the best square for you.', zh: '当然！我给你留了最好的格子。' },
       { q: 'meh', pt: 'Pode ser, vou ver minha agenda.', en: 'Maybe, let me check my schedule.', zh: '也许吧，我看看日程。' },
-      { q: 'bad', pt: 'Acho que não, prefiro jogar sozinho.', en: 'I don’t think so, I’d rather play alone.', zh: '算了吧，我更喜欢一个人玩。' },
+      { q: 'bad', pt: 'Acho que não, prefiro jogar sozinh{u:a|o|e}.', en: 'I don’t think so, I’d rather play alone.', zh: '算了吧，我更喜欢一个人玩。' },
     ],
     react: {
       good: { pt: ['Aaah, que fofo! 😍', 'Você sabe conversar! 💚', 'Ganhou meu coração (e minha folha). 🌿'], en: ['Aww, how sweet! 😍', 'You know how to talk! 💚', 'You won my heart (and my leaf). 🌿'], zh: ['哇，好甜！😍', '你真会聊天！💚', '你赢得了我的心（和我的叶子）。🌿'] },
@@ -223,11 +223,11 @@
     dateLostMsg: { pt: ['Foi divertido mesmo assim... tenta de novo? 🥺'], en: ['It was fun anyway... try again? 🥺'], zh: ['还是很开心……再试一次？🥺'] },
     relUp: {
       1: { pt: 'Agora é oficial: estamos namorando! 💕', en: 'It’s official: we’re dating! 💕', zh: '正式官宣：我们在交往了！💕' },
-      2: { pt: 'Sim! Aceito ser sua noiva! 💍 Agora só falta o casamento...', en: 'Yes! I’ll marry you! 💍 Now we just need the wedding...', zh: '我愿意！💍 现在只差一场婚礼……' },
+      2: { pt: 'Sim! Aceito ser {g:sua noiva|seu noivo|sue noive}! 💍 Agora só falta o casamento...', en: 'Yes! I’ll marry you! 💍 Now we just need the wedding...', zh: '我愿意！💍 现在只差一场婚礼……' },
       3: { pt: 'Felizes para sempre! 💒', en: 'Happily ever after! 💒', zh: '永远幸福！💒' },
     },
     breakup: { pt: 'Acho melhor a gente terminar... você nunca me chama para as fases. 💔', en: 'I think we should break up... you never take me to your levels. 💔', zh: '我觉得我们该分手了……你从来不带我去关卡。💔' },
-    giftThanks: { pt: ['Obrigada! 🥰', 'Aaah, que fofo! 💚', 'Você é demais! 😍'], en: ['Thank you! 🥰', 'Aww, so sweet! 💚', 'You’re amazing! 😍'], zh: ['谢谢！🥰', '哇，好贴心！💚', '你太棒了！😍'] },
+    giftThanks: { pt: ['Obrigad{g:a|o|e}! 🥰', 'Aaah, que fofo! 💚', 'Você é demais! 😍'], en: ['Thank you! 🥰', 'Aww, so sweet! 💚', 'You’re amazing! 😍'], zh: ['谢谢！🥰', '哇，好贴心！💚', '你太棒了！😍'] },
     giftBackFood: { pt: 'Toma, um adubo pra nossa próxima fase! 🌱', en: 'Here, some plant food for our next level! 🌱', zh: '给你，下一关用的能量豆！🌱' },
     giftBackLikes: { pt: 'Presente pra você: mais curtidas! (mas só olha pra mim, hein 😏)', en: 'A gift for you: more likes! (but only look at me, okay 😏)', zh: '送你：更多喜欢！（但只能看我哦 😏）' },
   });
@@ -249,7 +249,7 @@
     greet: {
       morning: { pt: ['Bom dia! ☀️ Dormiu bem?', 'Bom diaaa! Já tomou seu sol hoje? 🌞', 'Acordei pensando em você. 🌱'], en: ['Good morning! ☀️ Sleep well?', 'Morning! Had your sunshine yet? 🌞', 'Woke up thinking about you. 🌱'], zh: ['早安！☀️ 睡得好吗？', '早上好！今天晒太阳了吗？🌞', '醒来就想到你。🌱'] },
       afternoon: { pt: ['Boa tarde! Como está o seu jardim? 🌻', 'Oi! Saudade de você. 💚', 'Tarde tranquila por aqui... e aí?'], en: ['Good afternoon! How’s your garden? 🌻', 'Hi! I miss you. 💚', 'Quiet afternoon here... what’s up?'], zh: ['下午好！你的花园怎么样？🌻', '嗨！想你了。💚', '这里的下午很安静……你呢？'] },
-      night: { pt: ['Boa noite! 🌙 Ainda acordado?', 'A lua está linda hoje. Pensei em você. 🌙', 'Boa noite... sem zumbis nos sonhos, tá? 😴'], en: ['Good evening! 🌙 Still up?', 'The moon is beautiful tonight. Thought of you. 🌙', 'Good night... no zombies in your dreams, okay? 😴'], zh: ['晚上好！🌙 还没睡吗？', '今晚的月亮好美，想到了你。🌙', '晚安……梦里不要有僵尸哦。😴'] },
+      night: { pt: ['Boa noite! 🌙 Ainda acordad{u:a|o|e}?', 'A lua está linda hoje. Pensei em você. 🌙', 'Boa noite... sem zumbis nos sonhos, tá? 😴'], en: ['Good evening! 🌙 Still up?', 'The moon is beautiful tonight. Thought of you. 🌙', 'Good night... no zombies in your dreams, okay? 😴'], zh: ['晚上好！🌙 还没睡吗？', '今晚的月亮好美，想到了你。🌙', '晚安……梦里不要有僵尸哦。😴'] },
     },
     // The question of the day of each partner: answers good / so-so / bad.
     daily: [
@@ -268,7 +268,7 @@
       { q: { pt: 'Se a gente fosse para um mundo novo, qual seria?', en: 'If we went to a new world, which one?', zh: '如果我们去一个新世界，会是哪里？' }, a: [
         { q: 'good', pt: 'Qualquer um, desde que seja com você', en: 'Any, as long as it’s with you', zh: '只要和你一起，哪里都行' },
         { q: 'meh', pt: 'Futuro Distante 🚀', en: 'Far Future 🚀', zh: '遥远的未来 🚀' },
-        { q: 'bad', pt: 'Prefiro ficar em casa sozinho', en: 'I’d rather stay home alone', zh: '我宁愿一个人待在家' } ] },
+        { q: 'bad', pt: 'Prefiro ficar em casa sozinh{u:a|o|e}', en: 'I’d rather stay home alone', zh: '我宁愿一个人待在家' } ] },
       { q: { pt: 'Você ainda pensa em mim quando joga com outras plantas? 🥺', en: 'Do you still think of me when you play with other plants? 🥺', zh: '你和别的植物玩的时候还会想我吗？🥺' }, a: [
         { q: 'good', pt: 'Sempre! 💕', en: 'Always! 💕', zh: '一直都会！💕' },
         { q: 'meh', pt: 'Às vezes', en: 'Sometimes', zh: '有时候' },
@@ -280,26 +280,154 @@
     ],
   });
 
+  /* ------------------------------------------------ texts added in 2.2 */
+
+  // Plant traits ({g:fem|masc|neutral} follows the plant's gender, {u:…}
+  // the player's).
+  var TRAITS = {
+    gender: {
+      f: { icon: '♀', pt: 'Mulher', en: 'Woman', zh: '女' },
+      m: { icon: '♂', pt: 'Homem', en: 'Man', zh: '男' },
+      n: { icon: '⚧', pt: 'Não-binárie', en: 'Non-binary', zh: '非二元' },
+    },
+    interest: {
+      f: { pt: 'mulheres', en: 'women', zh: '女性' },
+      m: { pt: 'homens', en: 'men', zh: '男性' },
+      n: { pt: 'pessoas não-binárias', en: 'non-binary people', zh: '非二元者' },
+      all: { pt: 'todo mundo', en: 'everyone', zh: '所有人' },
+    },
+    signs: [
+      { icon: '♈', pt: 'Áries', en: 'Aries', zh: '白羊座' }, { icon: '♉', pt: 'Touro', en: 'Taurus', zh: '金牛座' },
+      { icon: '♊', pt: 'Gêmeos', en: 'Gemini', zh: '双子座' }, { icon: '♋', pt: 'Câncer', en: 'Cancer', zh: '巨蟹座' },
+      { icon: '♌', pt: 'Leão', en: 'Leo', zh: '狮子座' }, { icon: '♍', pt: 'Virgem', en: 'Virgo', zh: '处女座' },
+      { icon: '♎', pt: 'Libra', en: 'Libra', zh: '天秤座' }, { icon: '♏', pt: 'Escorpião', en: 'Scorpio', zh: '天蝎座' },
+      { icon: '♐', pt: 'Sagitário', en: 'Sagittarius', zh: '射手座' }, { icon: '♑', pt: 'Capricórnio', en: 'Capricorn', zh: '摩羯座' },
+      { icon: '♒', pt: 'Aquário', en: 'Aquarius', zh: '水瓶座' }, { icon: '♓', pt: 'Peixes', en: 'Pisces', zh: '双鱼座' },
+    ],
+    jobs: {
+      sun: [{ pt: 'Engenheir{g:a|o|e} solar', en: 'Solar engineer', zh: '太阳能工程师' }, { pt: 'Barista de raio de sol', en: 'Sunbeam barista', zh: '阳光咖啡师' }],
+      defense: [{ pt: 'Segurança de balada', en: 'Club bouncer', zh: '夜店保安' }, { pt: 'Guarda-costas', en: 'Bodyguard', zh: '保镖' }],
+      attack: [{ pt: 'Atirador{g:a||e} profissional', en: 'Professional sharpshooter', zh: '职业射手' }, { pt: 'Personal trainer', en: 'Personal trainer', zh: '私人教练' }],
+      area: [{ pt: 'Especialista em demolição', en: 'Demolition expert', zh: '爆破专家' }, { pt: 'Pirotécnic{g:a|o|e}', en: 'Pyrotechnician', zh: '烟火师' }],
+      support: [{ pt: 'Consultor{g:a||e} de jardinagem', en: 'Gardening consultant', zh: '园艺顾问' }, { pt: 'Influencer de jardim', en: 'Garden influencer', zh: '花园网红' }],
+    },
+    foods: [
+      { pt: 'Água com açúcar', en: 'Sugar water', zh: '糖水' }, { pt: 'Adubo orgânico', en: 'Organic compost', zh: '有机肥' },
+      { pt: 'Pizza de cogumelo', en: 'Mushroom pizza', zh: '蘑菇披萨' }, { pt: 'Salada (sem ironia)', en: 'Salad (no irony)', zh: '沙拉（不是讽刺）' },
+      { pt: 'Raio de sol ao ponto', en: 'Medium-rare sunbeam', zh: '五分熟的阳光' }, { pt: 'Chá de camomila', en: 'Chamomile tea', zh: '洋甘菊茶' },
+    ],
+    music: [
+      { pt: 'Rock zumbi', en: 'Zombie rock', zh: '僵尸摇滚' }, { pt: 'Pagode de quintal', en: 'Backyard samba', zh: '后院桑巴' },
+      { pt: 'Lo-fi para regar', en: 'Lo-fi to water plants to', zh: '浇水 Lo-fi' }, { pt: 'Sertanejo raiz (literalmente)', en: 'Roots country (literally)', zh: '乡村根源（字面意思）' },
+      { pt: 'K-pop das flores', en: 'Flower K-pop', zh: '花之 K-pop' }, { pt: 'Música clássica para fotossíntese', en: 'Classical music for photosynthesis', zh: '光合作用古典乐' },
+    ],
+    pets: [
+      { pt: 'Um caracol', en: 'A snail', zh: '一只蜗牛' }, { pt: 'Uma abelha', en: 'A bee', zh: '一只蜜蜂' },
+      { pt: 'Uma minhoca chamada Jorge', en: 'An earthworm named George', zh: '一条叫乔治的蚯蚓' }, { pt: 'Nenhum, só o cortador de grama', en: 'None, just the lawn mower', zh: '没有，只有割草机' },
+      { pt: 'Um zumbi de estimação (segredo)', en: 'A pet zombie (secret)', zh: '一只宠物僵尸（秘密）' },
+    ],
+    kids: [
+      { pt: 'Quer mudas algum dia 🌱', en: 'Wants seedlings someday 🌱', zh: '以后想要小苗 🌱' },
+      { pt: 'Talvez mudas', en: 'Maybe seedlings', zh: '也许要小苗' },
+      { pt: 'Sem mudas, obrigad{g:a|o|e}', en: 'No seedlings, thanks', zh: '不要小苗，谢谢' },
+    ],
+    drinks: { pt: 'Só água 💧', en: 'Water only 💧', zh: '只喝水 💧' },
+    smokes: { pt: 'Não, faz fotossíntese 🌿', en: 'No, does photosynthesis 🌿', zh: '不抽，只做光合作用 🌿' },
+    // Love languages change what the relationship values most (+1 point).
+    love: {
+      gifts: { icon: '🎁', pt: 'Presentes', en: 'Gifts', zh: '礼物', desc: { pt: 'presentes valem +1 ponto', en: 'gifts are worth +1 point', zh: '礼物额外 +1 分' } },
+      words: { icon: '💬', pt: 'Palavras de carinho', en: 'Words of affirmation', zh: '肯定的话语', desc: { pt: 'boas respostas na conversa do dia valem +1 ponto', en: 'good answers to the daily question are worth +1 point', zh: '每日问题答得好额外 +1 分' } },
+      time: { icon: '⏳', pt: 'Tempo juntos', en: 'Quality time', zh: '相处时光', desc: { pt: 'fases vencidas juntos valem +1 ponto', en: 'levels won together are worth +1 point', zh: '一起赢得关卡额外 +1 分' } },
+      dates: { icon: '💐', pt: 'Encontros', en: 'Dates', zh: '约会', desc: { pt: 'encontros vencidos valem +1 ponto', en: 'dates won are worth +1 point', zh: '赢得约会额外 +1 分' } },
+    },
+    labels: {
+      basics: { pt: 'Informações básicas', en: 'Basics', zh: '基本信息' },
+      gender: { pt: 'Gênero', en: 'Gender', zh: '性别' },
+      lookingFor: { pt: 'Procura', en: 'Looking for', zh: '寻找' },
+      sign: { pt: 'Signo', en: 'Sign', zh: '星座' },
+      height: { pt: 'Altura', en: 'Height', zh: '身高' },
+      job: { pt: 'Profissão', en: 'Job', zh: '职业' },
+      food: { pt: 'Comida favorita', en: 'Favorite food', zh: '最爱食物' },
+      music: { pt: 'Música', en: 'Music', zh: '音乐' },
+      pet: { pt: 'Pet', en: 'Pet', zh: '宠物' },
+      kids: { pt: 'Família', en: 'Family plans', zh: '家庭' },
+      drinks: { pt: 'Bebe', en: 'Drinks', zh: '饮酒' },
+      smokes: { pt: 'Fuma', en: 'Smokes', zh: '吸烟' },
+      love: { pt: 'Linguagem do amor', en: 'Love language', zh: '爱的语言' },
+      seeks: { pt: 'procura {who}', en: 'looking for {who}', zh: '寻找{who}' },
+      notYou: { pt: 'procura {who}: match mais difícil', en: 'looking for {who}: harder to match', zh: '寻找{who}：较难配对' },
+    },
+  };
+
+  Object.assign(TXT, {
+    prefMe: { pt: 'Você é', en: 'You are', zh: '你是' },
+    prefMeTip: { pt: 'Usado nas conversas e no que as plantas procuram.', en: 'Used in chats and in who the plants look for.', zh: '用于聊天以及植物的择偶偏好。' },
+    prefShow: { pt: 'Mostrar', en: 'Show me', zh: '显示' },
+    prefUnset: { pt: 'Prefiro não dizer', en: 'Rather not say', zh: '不想说' },
+    showAll: { pt: 'Todo mundo', en: 'Everyone', zh: '所有人' },
+    cm: { pt: '{n} cm', en: '{n} cm', zh: '{n} 厘米' },
+  });
+
+  Object.assign(TXT, {
+    pmPlants: { pt: 'Plantas', en: 'Plants', zh: '植物' },
+    pmPlayers: { pt: 'Jogadores', en: 'Players', zh: '玩家' },
+    pmLogin: { pt: 'Entre numa conta (menu Multijogador) para conversar com outros jogadores.', en: 'Log in (Multiplayer menu) to chat with other players.', zh: '登录账号（多人菜单）即可与其他玩家聊天。' },
+    pmYou: { pt: 'você', en: 'you', zh: '你' },
+    pmHidden: { pt: 'perfil oculto', en: 'hidden profile', zh: '资料已隐藏' },
+    pmEdit: { pt: 'Toque para editar seu perfil', en: 'Tap to edit your profile', zh: '点击编辑资料' },
+    pmChats: { pt: 'Conversas', en: 'Chats', zh: '聊天' },
+    pmInApp: { pt: 'No app ({n})', en: 'In the app ({n})', zh: '在线玩家（{n}）' },
+    pmNobody: { pt: 'Ninguém por aqui ainda. Chame seus amigos!', en: 'Nobody here yet. Invite your friends!', zh: '这里还没有人。邀请你的朋友吧！' },
+    pmMessage: { pt: 'Mensagem', en: 'Message', zh: '发消息' },
+    pmBlock: { pt: 'Bloquear', en: 'Block', zh: '屏蔽' },
+    pmReport: { pt: 'Denunciar', en: 'Report', zh: '举报' },
+    pmBlockAsk: { pt: 'Bloquear {name}? Vocês não vão mais se ver nem trocar mensagens.', en: 'Block {name}? You won’t see each other or exchange messages anymore.', zh: '屏蔽 {name}？你们将互相看不到，也无法互发消息。' },
+    pmBlocked: { pt: '{name} foi bloqueado.', en: '{name} was blocked.', zh: '已屏蔽 {name}。' },
+    pmReportAsk: { pt: 'Por que você está denunciando {name}? (as últimas mensagens vão junto para os administradores)', en: 'Why are you reporting {name}? (the latest messages go to the admins too)', zh: '为什么举报 {name}？（最近的消息也会发送给管理员）' },
+    pmReported: { pt: 'Denúncia enviada aos administradores.', en: 'Report sent to the admins.', zh: '举报已发送给管理员。' },
+    pmProfile: { pt: 'Seu perfil de jogador', en: 'Your player profile', zh: '你的玩家资料' },
+    pmProfileDesc: { pt: 'Outros jogadores do servidor veem seu nome, este perfil, seu namoro mais sério e seu último time, e podem te mandar mensagens.', en: 'Other players on the server see your name, this profile, your most serious partner and your last team, and can message you.', zh: '服务器上的其他玩家会看到你的名字、这份资料、你最认真的恋人和你上一支队伍，并可以给你发消息。' },
+    pmFavPlant: { pt: 'Planta favorita (sua foto)', en: 'Favorite plant (your picture)', zh: '最喜欢的植物（头像）' },
+    pmBio: { pt: 'Bio', en: 'Bio', zh: '简介' },
+    pmBioPh: { pt: 'Ex.: defendo gramados desde 2009 🌻', en: 'E.g. defending lawns since 2009 🌻', zh: '例：2009 年起守护草坪 🌻' },
+    pmVisible: { pt: 'Aparecer para outros jogadores', en: 'Show me to other players', zh: '对其他玩家可见' },
+    pmRules: { pt: 'Seja gentil. Você pode bloquear ou denunciar qualquer jogador pelo perfil dele.', en: 'Be kind. You can block or report any player from their profile.', zh: '友善交流。你可以在玩家资料中屏蔽或举报对方。' },
+    pmSave: { pt: 'Salvar perfil', en: 'Save profile', zh: '保存资料' },
+    pmBlockedList: { pt: 'Jogadores bloqueados', en: 'Blocked players', zh: '已屏蔽的玩家' },
+    pmUnblock: { pt: 'Desbloquear', en: 'Unblock', zh: '取消屏蔽' },
+    pmFirst: { pt: 'Diga oi para {name}! 👋', en: 'Say hi to {name}! 👋', zh: '跟 {name} 打个招呼吧！👋' },
+    pmTypePh: { pt: 'Mensagem…', en: 'Message…', zh: '消息…' },
+    pmSend: { pt: 'Enviar', en: 'Send', zh: '发送' },
+    pmErr: {
+      blocked: { pt: 'Não foi possível enviar: vocês estão bloqueados.', en: 'Could not send: one of you blocked the other.', zh: '无法发送：你们之间存在屏蔽。' },
+      hidden: { pt: 'Não foi possível enviar: esse jogador ocultou o perfil.', en: 'Could not send: this player hid their profile.', zh: '无法发送：该玩家已隐藏资料。' },
+      no_profile: { pt: 'Crie seu perfil antes de mandar mensagens.', en: 'Create your profile before sending messages.', zh: '请先创建资料再发消息。' },
+      no_player: { pt: 'Jogador não encontrado.', en: 'Player not found.', zh: '找不到该玩家。' },
+      rate_limited: { pt: 'Calma! Muitas mensagens seguidas.', en: 'Slow down! Too many messages in a row.', zh: '慢一点！消息发得太快了。' },
+      other: { pt: 'Não foi possível enviar agora.', en: 'Could not send right now.', zh: '暂时无法发送。' },
+    },
+  });
+
   // Personalities: the openers and reactions of each plant, her favorite
   // sticker and how easily she ghosts after a bad reply.
   var PERS = {
     sweet: {
       icon: '🥰', sticker: '❤️', ghost: 0.3,
-      name: { pt: 'Carinhosa', en: 'Sweet', zh: '温柔' },
+      name: { pt: 'Carinhos{g:a|o|e}', en: 'Sweet', zh: '温柔' },
       openers: { pt: ['Oi, flor! Que bom que deu match. 🥰', 'Seu perfil me deixou com as folhas vermelhas. ☺️'], en: ['Hi, sunshine! So glad we matched. 🥰', 'Your profile made my leaves blush. ☺️'], zh: ['嗨，小太阳！好高兴配对成功。🥰', '你的资料让我的叶子都红了。☺️'] },
       good: { pt: ['Que amor! 🥰', 'Você é um doce. 💕'], en: ['So sweet! 🥰', 'You’re a sweetheart. 💕'], zh: ['好甜！🥰', '你真贴心。💕'] },
       bad: { pt: ['Ai... isso doeu. 🥺', 'Poxa... 😢'], en: ['Ouch... that hurt. 🥺', 'Aw... 😢'], zh: ['哎……好伤人。🥺', '唉……😢'] },
     },
     shy: {
       icon: '🙈', sticker: '🌻', ghost: 0.6,
-      name: { pt: 'Tímida', en: 'Shy', zh: '害羞' },
+      name: { pt: 'Tímid{g:a|o|e}', en: 'Shy', zh: '害羞' },
       openers: { pt: ['o-oi... 🙈', 'Eu nunca sei o que dizer primeiro... oi? 😳'], en: ['h-hi... 🙈', 'I never know what to say first... hi? 😳'], zh: ['你、你好……🙈', '我总不知道先说什么……嗨？😳'] },
-      good: { pt: ['*fica vermelha* 😳', 'Obrigada... 🙈'], en: ['*blushes* 😳', 'Thank you... 🙈'], zh: ['*脸红* 😳', '谢谢……🙈'] },
+      good: { pt: ['*fica vermelh{g:a|o|e}* 😳', 'Obrigad{g:a|o|e}... 🙈'], en: ['*blushes* 😳', 'Thank you... 🙈'], zh: ['*脸红* 😳', '谢谢……🙈'] },
       bad: { pt: ['...', 'Ah. Tá. 😶'], en: ['...', 'Oh. Okay. 😶'], zh: ['……', '哦。好吧。😶'] },
     },
     sassy: {
       icon: '💅', sticker: '🔥', ghost: 0.7,
-      name: { pt: 'Atrevida', en: 'Sassy', zh: '傲娇' },
+      name: { pt: 'Atrevid{g:a|o|e}', en: 'Sassy', zh: '傲娇' },
       openers: { pt: ['Demorou pra me curtir, hein? 💅', 'Sim, eu sei que sou a melhor planta do app. Oi. 😏'], en: ['Took you long enough to like me. 💅', 'Yes, I know I’m the best plant here. Hi. 😏'], zh: ['这么久才喜欢我？💅', '对，我知道我是这里最好的植物。嗨。😏'] },
       good: { pt: ['Hmm, gostei de você. 😏', 'Ok, você tem estilo. 🔥'], en: ['Hmm, I like you. 😏', 'Okay, you’ve got style. 🔥'], zh: ['嗯，我喜欢你。😏', '行，你有品位。🔥'] },
       bad: { pt: ['Próximo! 💅', 'Sério? 🙄'], en: ['Next! 💅', 'Seriously? 🙄'], zh: ['下一个！💅', '认真的？🙄'] },
@@ -313,14 +441,14 @@
     },
     brave: {
       icon: '💪', sticker: '🧟', ghost: 0.3,
-      name: { pt: 'Corajosa', en: 'Brave', zh: '勇敢' },
+      name: { pt: 'Corajos{g:a|o|e}', en: 'Brave', zh: '勇敢' },
       openers: { pt: ['Bora derrotar uns zumbis juntos? 💪', 'Eu fico na primeira fileira. E você? ⚔️'], en: ['Let’s beat some zombies together? 💪', 'I stand in the front row. You? ⚔️'], zh: ['一起去打僵尸吧？💪', '我站第一排。你呢？⚔️'] },
       good: { pt: ['Isso aí! 💪', 'Gostei da atitude! ⚔️'], en: ['That’s it! 💪', 'Love the attitude! ⚔️'], zh: ['就是这样！💪', '喜欢你的态度！⚔️'] },
       bad: { pt: ['Fraco. 😤', 'Esperava mais de você. 😤'], en: ['Weak. 😤', 'I expected more. 😤'], zh: ['太弱了。😤', '我以为你会更好。😤'] },
     },
     drama: {
       icon: '🎭', sticker: '😂', ghost: 0.5,
-      name: { pt: 'Dramática', en: 'Dramatic', zh: '戏精' },
+      name: { pt: 'Dramátic{g:a|o|e}', en: 'Dramatic', zh: '戏精' },
       openers: { pt: ['FINALMENTE um match! Eu já estava murchando de solidão. 🎭', 'Ai, meu caule! Você é real? 😱'], en: ['FINALLY a match! I was wilting of loneliness. 🎭', 'Oh my stem! Are you real? 😱'], zh: ['终于配对了！我都孤独得快枯萎了。🎭', '我的茎啊！你是真的吗？😱'] },
       good: { pt: ['Eu vou CHORAR. 😭💕', 'A melhor coisa que já me disseram! 🎭'], en: ['I’m going to CRY. 😭💕', 'Best thing anyone ever told me! 🎭'], zh: ['我要哭了。😭💕', '这是我听过最好的话！🎭'] },
       bad: { pt: ['Que TRAGÉDIA. 😱', 'Meu coração virou adubo. 💔'], en: ['What a TRAGEDY. 😱', 'My heart turned to compost. 💔'], zh: ['真是悲剧！😱', '我的心变成肥料了。💔'] },
@@ -345,5 +473,5 @@
     { icon: '💒', name: { pt: 'Casados', en: 'Married', zh: '已结婚' }, bonus: { pt: '+2 adubos, +100 ☀', en: '+2 plant food, +100 ☀', zh: '+2 能量豆，+100 ☀' } },
   ];
 
-  X.matchText = { TXT: TXT, CHAT: CHAT, PERS: PERS, DATES: DATES, STAGES: STAGES };
+  X.matchText = { TXT: TXT, CHAT: CHAT, PERS: PERS, DATES: DATES, STAGES: STAGES, TRAITS: TRAITS };
 })();

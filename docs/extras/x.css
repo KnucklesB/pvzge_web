@@ -1873,3 +1873,135 @@ body.pvzx-open .mp-menu-account {
 .pvzx-mrow.pvzx-unread .pvzx-mrow-aff small {
   color: #ff6b9a;
 }
+
+/* plant match 2.2: traits, players */
+.pvzx-seek {
+  color: #b3541e !important;
+}
+.pvzx-compat .pvzx-seek {
+  font-size: 12px;
+}
+.pvzx-msub {
+  display: flex;
+  gap: 4px;
+  padding: 2px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.pvzx-msub button {
+  position: relative;
+  flex: 1;
+  padding: 5px 0;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: #c9aecc;
+  font-family: var(--mp-font);
+  font-size: 14px;
+  cursor: pointer;
+}
+.pvzx-msub button.pvzx-on {
+  background: #ff3d8b;
+  color: #fff;
+}
+.pvzx-msub i {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: #fff;
+  color: #d23a7a;
+  font-style: normal;
+  font-size: 11px;
+}
+.pvzx-msec-title {
+  margin: 10px 0 2px;
+  font-weight: normal;
+  color: #ffb3cf;
+}
+.pvzx-mrow.pvzx-me {
+  border: 1px dashed rgba(255, 255, 255, 0.25);
+  border-radius: 12px;
+}
+.pvzx-badge-n {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #ff3d8b;
+  color: #fff;
+  font-style: normal;
+  font-size: 11px;
+  text-align: center;
+}
+.pvzx-psheet,
+.pvzx-peditor {
+  padding: 10px 12px;
+  border-radius: 18px;
+  background: #fff8ec;
+  color: #2b1608;
+}
+.pvzx-psheet h3,
+.pvzx-peditor h3 {
+  margin: 4px 0;
+  font-weight: normal;
+  color: #d23a7a;
+}
+.pvzx-peditor h4 {
+  margin: 10px 0 4px;
+  font-weight: normal;
+}
+.pvzx-peditor .pvzx-small,
+.pvzx-psheet .pvzx-small {
+  color: #6d4b2d;
+}
+.pvzx-psheet-pic {
+  display: flex;
+  justify-content: center;
+}
+.pvzx-psheet-pic img {
+  width: 140px;
+  border-radius: 10px;
+}
+.pvzx-psheet .pvzx-x {
+  float: left;
+}
+.pvzx-pteam {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin-top: 8px;
+}
+.pvzx-pteam img {
+  width: 100%;
+  border-radius: 5px;
+}
+.pvzx-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: 2px solid #f0c9a0;
+  border-radius: 12px;
+  background: #fff;
+  color: #2b1608;
+  font-family: var(--mp-font);
+  font-size: 16px;
+  user-select: text;
+}
+.pvzx-pm-foot {
+  display: flex;
+  gap: 6px;
+  padding: 6px 8px;
+  border-top: 1px solid #ecd6b6;
+}
+.pvzx-pm-foot .mp-btn {
+  font-size: 18px;
+}
+.pvzx-players .pvzx-mavatar img {
+  max-width: 120%;
+  max-height: 120%;
+}
+.pvzx-blocked {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+}

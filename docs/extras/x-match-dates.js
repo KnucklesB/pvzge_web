@@ -24,6 +24,7 @@
   var PERS = MT.PERS;
   var DATES = MT.DATES;
   var STAGES = MT.STAGES;
+  var TRAITS = MT.TRAITS;
   var fill = I.fill;
   var L = I.L;
   var Lp = I.Lp;
@@ -281,7 +282,7 @@
     // xp after the wedding flag: the stage messages come from the change.
     // A first date starts the relationship (seeing each other) whatever the
     // stars; later dates add one point per star.
-    I.addXp(code, fresh ? Math.min(stars, 2) : stars);
+    I.addXp(code, fresh ? Math.min(stars, 2) : stars + I.loveBonus(code, 'dates'));
     if (dt.id === 'wedding' && !fresh) I.stageMessages(code, before, 3);
     X.store.set('matchReveals', I.reveals() + 1);
     if (stars === 3) {
@@ -320,7 +321,7 @@
       c.mem.levels++;
       if (won) c.mem.wins++;
       if (ps[code] || others.indexOf(code) >= 0) I.later(code, Lp(won ? CHAT.afterWin : CHAT.afterLoss, { kills: s.kills || 0 }), 4000 + Math.random() * 25000);
-      if (ps[code] && won) I.addXp(code, 1);
+      if (ps[code] && won) I.addXp(code, 1 + I.loveBonus(code, 'time'));
     });
     I.saveChats();
     var wk = I.week();

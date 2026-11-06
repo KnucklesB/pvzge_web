@@ -26,6 +26,7 @@ const SESSION_TTL = 60 * 24 * 3600 * 1000;
 const MAX_MATCHES = 2000;
 const MAX_SCORES = 500; // kept per board
 const MAX_MATCH_PLANTS = 2000;
+const MAX_DMS = 20000; // private messages kept by the FileStore
 
 function atomicWrite(file, data) {
   const tmp = file + '.' + process.pid + '.tmp';
@@ -89,7 +90,7 @@ function normalizeSave(text) {
  */
 class BaseStore {
   constructor() {
-    this.db = { users: {}, sessions: {}, matches: [], secret: '', scores: {}, achievements: {}, matchStats: {}, matchState: {} };
+    this.db = { users: {}, sessions: {}, matches: [], secret: '', scores: {}, achievements: {}, matchStats: {}, matchState: {}, matchProfiles: {}, dms: [], dmSeq: 0, matchReports: [] };
     this.byName = new Map();
     setInterval(() => this.pruneSessions(), 3600 * 1000).unref();
   }
@@ -119,6 +120,9 @@ class BaseStore {
   persistAchievements() {}
   persistMatchStats() {}
   persistMatchState() {}
+  persistMatchProfile() {}
+  persistDm() {}
+  persistMatchReport() {}
   checkWritable() {}
   flushSync() {}
   async close() {}
@@ -336,6 +340,72 @@ class BaseStore {
     return updatedAt;
   }
 
+  /* Plant Match players: profiles shown to other players and private
+     messages between them. FileStore keeps everything in db.json (the last
+     MAX_DMS messages); MariaStore overrides the messages with SQL. */
+
+  getMatchProfile(userId) {
+    return (this.db.matchProfiles || {})[userId] || null;
+  }
+
+  putMatchProfile(userId, prof) {
+    this.db.matchProfiles = this.db.matchProfiles || {};
+    this.db.matchProfiles[userId] = prof;
+    this.persistMatchProfile(userId, prof);
+    return prof;
+  }
+
+  listMatchProfiles() {
+    return Object.entries(this.db.matchProfiles || {}).map(([userId, p]) => Object.assign({ userId }, p));
+  }
+
+  async addDm(fromId, toId, text) {
+    const m = { id: ++this.db.dmSeq, from: fromId, to: toId, text, at: Date.now(), read: 0 };
+    this.db.dms.push(m);
+    if (this.db.dms.length > MAX_DMS) this.db.dms.splice(0, this.db.dms.length - MAX_DMS);
+    this.persistDm(m);
+    return m;
+  }
+
+  // Messages to or from the account after an id (the last `limit` ones).
+  async listDms(userId, afterId, limit) {
+    const list = this.db.dms.filter((m) => m.id > afterId && (m.from === userId || m.to === userId));
+    return list.slice(-limit).map((m) => Object.assign({}, m));
+  }
+
+  async markDmsRead(toId, fromId) {
+    const now = Date.now();
+    let n = 0;
+    for (const m of this.db.dms) {
+      if (m.to === toId && m.from === fromId && !m.read) {
+        m.read = now;
+        n++;
+      }
+    }
+    if (n) this.persistDm(null);
+    return n;
+  }
+
+  // Per correspondent: the last id of the account's messages they have read.
+  async lastReads(userId) {
+    const out = {};
+    for (const m of this.db.dms) {
+      if (m.from === userId && m.read && (!out[m.to] || m.id > out[m.to])) out[m.to] = m.id;
+    }
+    return out;
+  }
+
+  addMatchReport(r) {
+    this.db.matchReports = this.db.matchReports || [];
+    this.db.matchReports.push(r);
+    if (this.db.matchReports.length > 1000) this.db.matchReports.shift();
+    this.persistMatchReport(r);
+  }
+
+  async listMatchReports() {
+    return (this.db.matchReports || []).slice().reverse();
+  }
+
   /* achievements: {id: unlockedAt} per account */
 
   getAchievements(userId) {
@@ -421,6 +491,15 @@ class FileStore extends BaseStore {
     this.dirty();
   }
   persistMatchState() {
+    this.dirty();
+  }
+  persistMatchProfile() {
+    this.dirty();
+  }
+  persistDm() {
+    this.dirty();
+  }
+  persistMatchReport() {
     this.dirty();
   }
 

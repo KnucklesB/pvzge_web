@@ -29,7 +29,7 @@ const { ExpressPeerServer } = require('peer');
 const { openStore } = require('./store');
 const auth = require('./auth');
 
-const VERSION = '4.3.0';
+const VERSION = '4.4.0';
 const PORT = Number(process.env.PORT) || 9000;
 const MAX_SAVE = (Number(process.env.MAX_SAVE_MB) || 8) * 1024 * 1024;
 const ORIGINS = (process.env.ALLOWED_ORIGINS || '*')
@@ -180,7 +180,7 @@ function optionalUser(req, res, next) {
 /* ------------------------------------------------------------------- API */
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, version: VERSION, storage: store.kind, features: ['accounts', 'saves', 'rooms', 'matches', 'admin', 'history', 'scores', 'achievements', 'daily', 'branding', 'matchstats', 'matchstate'] });
+  res.json({ ok: true, version: VERSION, storage: store.kind, features: ['accounts', 'saves', 'rooms', 'matches', 'admin', 'history', 'scores', 'achievements', 'daily', 'branding', 'matchstats', 'matchstate', 'players'] });
 });
 
 // Accounts ---------------------------------------------------------------
@@ -777,6 +777,174 @@ app.put('/api/match/state', limit('save', 30), requireUser, matchJson, wrap(asyn
 app.get('/api/match/stats', limit('rooms', 120), (req, res) => {
   res.json({ top: store.topMatchStats(MATCH_KINDS, Math.min(30, Number(req.query.limit) || 10)) });
 });
+
+// Plant Match players -----------------------------------------------------
+//
+// Players who create a profile appear to each other and can send private
+// messages (polled by the game). Profiles: gender, who they look for, a bio
+// and a favorite plant; the partner shown comes from the synced progress.
+// Each player can block (no messages either way, hidden from each other) and
+// report (kept for the admins: GET /api/admin/match/reports).
+
+const GENDERS = ['f', 'm', 'n'];
+const ONLINE_MS = 90 * 1000;
+
+async function bestPartner(userId) {
+  const cur = readMatchState(await store.getMatchState(userId));
+  const ps = (cur && cur.state.matchPartners) || {};
+  const best = Object.keys(ps).sort((a, b) => ps[b].xp + (ps[b].married ? 10 : 0) - (ps[a].xp + (ps[a].married ? 10 : 0)))[0];
+  return best ? { partner: best, rel: relStage(ps[best]), points: couplePoints(ps) } : { partner: '', rel: -1, points: 0 };
+}
+
+function publicProfile(userId, p) {
+  const u = store.getUser(userId);
+  if (!u || !p) return null;
+  return {
+    name: u.username,
+    gender: p.gender,
+    interest: p.interest,
+    bio: p.bio,
+    plant: p.plant,
+    team: p.team,
+    partner: p.partner,
+    rel: p.rel,
+    points: p.points || 0,
+    online: Date.now() - (p.lastSeen || 0) < ONLINE_MS,
+    lastSeen: p.lastSeen || 0,
+    visible: !!p.visible,
+  };
+}
+
+// Marks the account as seen (written at most once a minute).
+function touch(userId) {
+  const p = store.getMatchProfile(userId);
+  if (!p) return;
+  const now = Date.now();
+  const write = now - (p.savedSeen || 0) > 60000;
+  p.lastSeen = now;
+  if (write) {
+    p.savedSeen = now;
+    store.putMatchProfile(userId, p);
+  }
+}
+
+function blockedBetween(a, b) {
+  const pa = store.getMatchProfile(a);
+  const pb = store.getMatchProfile(b);
+  return !!((pa && (pa.blocked || []).includes(b)) || (pb && (pb.blocked || []).includes(a)));
+}
+
+app.get('/api/match/me', limit('rooms', 120), requireUser, (req, res) => {
+  const p = store.getMatchProfile(req.user.id);
+  res.json({ profile: p ? Object.assign(publicProfile(req.user.id, p), { blocked: (p.blocked || []).map((id) => (store.getUser(id) || {}).username).filter(Boolean) }) : null });
+});
+
+app.put('/api/match/profile', limit('save', 30), requireUser, json, wrap(async (req, res) => {
+  const b = req.body || {};
+  const prev = store.getMatchProfile(req.user.id) || {};
+  const bp = await bestPartner(req.user.id);
+  const prof = {
+    visible: !!b.visible,
+    gender: GENDERS.includes(b.gender) ? b.gender : '',
+    interest: GENDERS.concat(['all']).includes(b.interest) ? b.interest : 'all',
+    bio: clean(b.bio, 160),
+    plant: PLANT_CODE.test(b.plant || '') ? b.plant : '',
+    team: (Array.isArray(b.team) ? b.team : []).filter((c) => typeof c === 'string' && PLANT_CODE.test(c)).slice(0, 8),
+    partner: bp.partner,
+    rel: bp.rel,
+    points: bp.points,
+    blocked: prev.blocked || [],
+    lastSeen: Date.now(),
+    savedSeen: Date.now(),
+  };
+  store.putMatchProfile(req.user.id, prof);
+  res.json({ profile: publicProfile(req.user.id, prof) });
+}));
+
+app.get('/api/match/players', limit('rooms', 120), requireUser, (req, res) => {
+  touch(req.user.id);
+  const me = req.user.id;
+  const list = store
+    .listMatchProfiles()
+    .filter((p) => p.userId !== me && p.visible && !blockedBetween(me, p.userId))
+    .map((p) => publicProfile(p.userId, p))
+    .filter(Boolean)
+    .sort((a, b) => b.online - a.online || b.lastSeen - a.lastSeen)
+    .slice(0, 100);
+  res.json({ players: list });
+});
+
+function nameOf(id) {
+  const u = store.getUser(id);
+  return u ? u.username : '?';
+}
+
+app.get('/api/match/dm', limit('dm', 120), requireUser, wrap(async (req, res) => {
+  touch(req.user.id);
+  const me = req.user.id;
+  const after = Math.max(0, Math.floor(Number(req.query.after) || 0));
+  const msgs = (await store.listDms(me, after, after ? 500 : 300)).filter((m) => !blockedBetween(me, m.from === me ? m.to : m.from));
+  const reads = {};
+  for (const [id, last] of Object.entries(await store.lastReads(me))) reads[nameOf(id)] = last;
+  const profiles = {};
+  for (const m of msgs) {
+    const other = m.from === me ? m.to : m.from;
+    if (!profiles[nameOf(other)]) profiles[nameOf(other)] = publicProfile(other, store.getMatchProfile(other));
+  }
+  res.json({
+    me: req.user.username,
+    messages: msgs.map((m) => ({ id: m.id, from: nameOf(m.from), to: nameOf(m.to), text: m.text, at: m.at, read: m.read || 0 })),
+    reads,
+    profiles,
+  });
+}));
+
+app.post('/api/match/dm', limit('dmsend', 30), requireUser, json, wrap(async (req, res) => {
+  const b = req.body || {};
+  const text = clean(b.text, 500);
+  const target = store.findUser(String(b.to || ''));
+  if (!text) return res.status(400).json({ error: 'empty' });
+  if (!target || target.id === req.user.id) return res.status(404).json({ error: 'no_player' });
+  const mine = store.getMatchProfile(req.user.id);
+  const theirs = store.getMatchProfile(target.id);
+  if (!mine) return res.status(400).json({ error: 'no_profile' });
+  if (!theirs || !theirs.visible) return res.status(403).json({ error: 'hidden' });
+  if (blockedBetween(req.user.id, target.id)) return res.status(403).json({ error: 'blocked' });
+  touch(req.user.id);
+  const m = await store.addDm(req.user.id, target.id, text);
+  res.json({ message: { id: m.id, from: req.user.username, to: target.username, text: m.text, at: m.at, read: 0 } });
+}));
+
+app.post('/api/match/dm/read', limit('dm', 120), requireUser, json, wrap(async (req, res) => {
+  const other = store.findUser(String((req.body && req.body.with) || ''));
+  if (!other) return res.status(404).json({ error: 'no_player' });
+  res.json({ read: await store.markDmsRead(req.user.id, other.id) });
+}));
+
+app.post('/api/match/block', limit('save', 30), requireUser, json, (req, res) => {
+  const other = store.findUser(String((req.body && req.body.name) || ''));
+  if (!other || other.id === req.user.id) return res.status(404).json({ error: 'no_player' });
+  const p = store.getMatchProfile(req.user.id) || { visible: false, gender: '', interest: 'all', bio: '', plant: '', team: [], lastSeen: Date.now() };
+  const set = new Set(p.blocked || []);
+  if (req.body.block === false) set.delete(other.id);
+  else set.add(other.id);
+  p.blocked = [...set].slice(0, 500);
+  store.putMatchProfile(req.user.id, p);
+  res.json({ blocked: p.blocked.map(nameOf) });
+});
+
+app.post('/api/match/report', limit('save', 10), requireUser, json, (req, res) => {
+  const other = store.findUser(String((req.body && req.body.name) || ''));
+  if (!other || other.id === req.user.id) return res.status(404).json({ error: 'no_player' });
+  store.addMatchReport({ reporter: req.user.id, target: other.id, reason: clean(req.body.reason, 200) || 'report', excerpt: clean(req.body.excerpt, 1000), at: Date.now() });
+  console.log('[report] %s reported %s', req.user.username, other.username);
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/match/reports', limit('admin', 60), requireAdmin, wrap(async (req, res) => {
+  const list = await store.listMatchReports();
+  res.json({ reports: list.map((r) => ({ reporter: nameOf(r.reporter), target: nameOf(r.target), reason: r.reason, excerpt: r.excerpt, at: r.at })) });
+}));
 
 const ACHIEVEMENT = /^[a-z0-9_]{2,40}$/;
 

@@ -24,6 +24,7 @@
   var PERS = MT.PERS;
   var DATES = MT.DATES;
   var STAGES = MT.STAGES;
+  var TRAITS = MT.TRAITS;
   var fill = I.fill;
   var L = I.L;
   var Lp = I.Lp;
