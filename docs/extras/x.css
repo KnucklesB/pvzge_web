@@ -1032,6 +1032,7 @@ body.pvzx-open .mp-menu-account {
   position: relative;
 }
 .pvzx-mcard-name .pvzx-fam {
+  white-space: nowrap;
   margin-left: 0;
   padding: 1px 8px;
   border-radius: 10px;
@@ -1808,4 +1809,67 @@ body.pvzx-open .mp-menu-account {
 }
 .pvzx-social > .mp-btn {
   margin-top: 4px;
+}
+
+/* plant match 2.1: real-time chat */
+.pvzx-bubble .pvzx-time {
+  display: block;
+  margin-top: 1px;
+  text-align: right;
+  font-size: 9px;
+  opacity: 0.7;
+}
+.pvzx-bubble.pvzx-sticker .pvzx-time {
+  font-size: 9px;
+}
+.pvzx-time i {
+  font-style: normal;
+}
+.pvzx-time i.pvzx-read {
+  color: #9fe6ff;
+  font-weight: bold;
+}
+.pvzx-from-them .pvzx-time i.pvzx-read {
+  color: #2a8fd0;
+}
+.pvzx-day {
+  align-self: center;
+  padding: 1px 10px;
+  border-radius: 10px;
+  background: #f0dcc0;
+  color: #6d4b2d;
+  font-size: 11px;
+}
+.pvzx-status.pvzx-online {
+  color: #2f8a3b !important;
+}
+.pvzx-status.pvzx-typing-now {
+  color: #d23a7a !important;
+  font-style: italic;
+}
+.pvzx-mrow {
+  position: relative;
+}
+.pvzx-dot {
+  position: absolute;
+  left: 40px;
+  top: 40px;
+  width: 11px;
+  height: 11px;
+  border: 2px solid #1f1121;
+  border-radius: 50%;
+  background: #3ccf4e;
+}
+.pvzx-mrow-aff {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.pvzx-mrow-aff small {
+  font-size: 10px;
+  color: #c9aecc;
+}
+.pvzx-mrow.pvzx-unread .pvzx-mrow-aff small {
+  color: #ff6b9a;
 }

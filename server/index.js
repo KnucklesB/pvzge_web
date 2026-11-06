@@ -29,7 +29,7 @@ const { ExpressPeerServer } = require('peer');
 const { openStore } = require('./store');
 const auth = require('./auth');
 
-const VERSION = '4.2.0';
+const VERSION = '4.3.0';
 const PORT = Number(process.env.PORT) || 9000;
 const MAX_SAVE = (Number(process.env.MAX_SAVE_MB) || 8) * 1024 * 1024;
 const ORIGINS = (process.env.ALLOWED_ORIGINS || '*')
@@ -180,7 +180,7 @@ function optionalUser(req, res, next) {
 /* ------------------------------------------------------------------- API */
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, version: VERSION, storage: store.kind, features: ['accounts', 'saves', 'rooms', 'matches', 'admin', 'history', 'scores', 'achievements', 'daily', 'branding', 'matchstats'] });
+  res.json({ ok: true, version: VERSION, storage: store.kind, features: ['accounts', 'saves', 'rooms', 'matches', 'admin', 'history', 'scores', 'achievements', 'daily', 'branding', 'matchstats', 'matchstate'] });
 });
 
 // Accounts ---------------------------------------------------------------
@@ -541,6 +541,8 @@ app.get('/api/scores/:board', limit('rooms', 120), optionalUser, (req, res) => {
 app.post('/api/scores/:board', limit('scores', 20), requireUser, json, (req, res) => {
   const board = clean(req.params.board, 48);
   if (!validBoard(board)) return res.status(400).json({ error: 'bad_board' });
+  // Computed by the server from the synced Plant Match progress.
+  if (board === 'challenge:couple') return res.status(400).json({ error: 'reserved_board' });
   const score = Math.floor(Number(req.body && req.body.score));
   if (!Number.isFinite(score) || score < 0 || score > 1e9) return res.status(400).json({ error: 'bad_score' });
   const d = (req.body && req.body.details) || {};
@@ -648,20 +650,129 @@ app.put('/api/admin/branding', limit('admin', 60), requireAdmin, json, wrap(asyn
 const MATCH_KINDS = ['like', 'super', 'match', 'date', 'partner', 'wed'];
 const PLANT_CODE = /^[a-z0-9_]{1,40}$/;
 
-app.post('/api/match/stats', limit('matchstats', 12), json, (req, res) => {
+// Each account (or address) adds at most this many counts a day.
+const STATS_PER_DAY = 600;
+const statBudget = new Map();
+
+app.post('/api/match/stats', limit('matchstats', 12), optionalUser, json, (req, res) => {
   const ev = (req.body && req.body.events) || {};
   const events = {};
   let count = 0;
+  let total = 0;
   for (const [code, kinds] of Object.entries(typeof ev === 'object' ? ev : {})) {
     if (!PLANT_CODE.test(code) || !kinds || typeof kinds !== 'object' || ++count > 40) continue;
     for (const kind of MATCH_KINDS) {
       const n = Math.floor(Number(kinds[kind]));
-      if (n > 0) (events[code] = events[code] || {})[kind] = Math.min(n, 10);
+      if (n > 0) {
+        (events[code] = events[code] || {})[kind] = Math.min(n, 10);
+        total += Math.min(n, 10);
+      }
     }
   }
+  const key = req.user ? 'u:' + req.user.id : 'ip:' + req.ip;
+  const day = today();
+  let b = statBudget.get(key);
+  if (!b || b.day !== day) statBudget.set(key, (b = { day, n: 0 }));
+  if (b.n + total > STATS_PER_DAY) return res.json({ ok: true, dropped: true });
+  b.n += total;
+  if (statBudget.size > 50000) statBudget.clear();
   store.addMatchStats(events);
   res.json({ ok: true });
 });
+
+// Plant Match progress of the account (partners, chats, likes…), synced by
+// the game. The partners feed the couples ranking, so the server checks
+// them: relationship points grow at most MATCH_XP_PER_DAY a day (plus a
+// first upload of offline progress), at most MAX_PARTNERS partners, a
+// wedding needs an engaged partner; the couple score is computed here.
+const MATCH_STATE_MAX = 600 * 1024;
+const MATCH_XP_PER_DAY = 40;
+const MATCH_XP_FIRST = 30;
+const MAX_PARTNERS = 5;
+const matchJson = express.json({ limit: '700kb' });
+const STATE_KEY = /^match[A-Za-z]{1,24}$/;
+
+function relStage(r) {
+  return r.married ? 3 : r.xp >= 8 ? 2 : r.xp >= 3 ? 1 : 0;
+}
+
+function couplePoints(ps) {
+  return Object.values(ps).reduce((n, r) => n + Math.max(0, r.xp) + (r.married ? 10 : 0), 0);
+}
+
+function smallMap(o, valid) {
+  const out = {};
+  if (o && typeof o === 'object') {
+    for (const [k, v] of Object.entries(o).slice(0, 20)) {
+      if (/^[a-z]{1,16}$/.test(k) && valid(v)) out[k] = v;
+    }
+  }
+  return out;
+}
+
+function checkPartners(next, prev, srv) {
+  const out = {};
+  const first = !prev;
+  prev = prev || {};
+  const day = today();
+  if (srv.day !== day) Object.assign(srv, { day, gained: 0 });
+  for (const [code, r] of Object.entries(next && typeof next === 'object' ? next : {})) {
+    if (!PLANT_CODE.test(code) || !r || typeof r !== 'object' || Object.keys(out).length >= MAX_PARTNERS) continue;
+    const p = prev[code];
+    const base = p ? Math.max(0, Number(p.xp) || 0) : 0;
+    let xp = Math.floor(Number(r.xp) || 0);
+    if (first) xp = Math.min(xp, MATCH_XP_FIRST);
+    else if (xp > base) {
+      const gain = Math.min(xp - base, Math.max(0, MATCH_XP_PER_DAY - srv.gained));
+      srv.gained += gain;
+      xp = base + gain;
+    }
+    xp = Math.max(-1, xp);
+    const married = !!r.married && ((p && p.married) || xp >= 8 || base >= 8);
+    out[code] = {
+      since: Math.min(Date.now(), Number(r.since) || Date.now()),
+      xp,
+      married,
+      dates: smallMap(r.dates, (v) => Number.isInteger(v) && v >= 0 && v <= 3),
+      gifts: smallMap(r.gifts, (v) => typeof v === 'string' && v.length <= 10),
+    };
+  }
+  return out;
+}
+
+function readMatchState(entry) {
+  if (!entry) return null;
+  try {
+    const o = JSON.parse(entry.data);
+    return { state: o.state || {}, srv: o.srv || {}, updatedAt: entry.updatedAt };
+  } catch (e) {
+    return null;
+  }
+}
+
+app.get('/api/match/state', limit('save', 60), requireUser, wrap(async (req, res) => {
+  const cur = readMatchState(await store.getMatchState(req.user.id));
+  res.json({ state: cur ? cur.state : null, updatedAt: cur ? cur.updatedAt : 0 });
+}));
+
+app.put('/api/match/state', limit('save', 30), requireUser, matchJson, wrap(async (req, res) => {
+  const body = req.body && req.body.state;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return res.status(400).json({ error: 'bad_state' });
+  const cur = readMatchState(await store.getMatchState(req.user.id));
+  const state = {};
+  for (const [k, v] of Object.entries(body)) if (STATE_KEY.test(k)) state[k] = v;
+  const srv = Object.assign({ day: '', gained: 0 }, cur ? cur.srv : {});
+  state.matchPartners = checkPartners(state.matchPartners, cur ? cur.state.matchPartners || {} : null, srv);
+  const data = JSON.stringify({ v: 1, state, srv });
+  if (Buffer.byteLength(data) > MATCH_STATE_MAX) return res.status(413).json({ error: 'too_large' });
+  const updatedAt = await store.putMatchState(req.user.id, data);
+  const ps = state.matchPartners;
+  const best = Object.keys(ps).sort((a, b) => ps[b].xp + (ps[b].married ? 10 : 0) - (ps[a].xp + (ps[a].married ? 10 : 0)))[0];
+  const points = couplePoints(ps);
+  let couple = null;
+  if (points > 0) couple = store.addScore('challenge:couple', req.user.id, points, { plant: best || '', rel: best ? String(relStage(ps[best])) : '', plants: Object.keys(ps).length });
+  res.json({ updatedAt, partners: ps, couple });
+}));
 
 app.get('/api/match/stats', limit('rooms', 120), (req, res) => {
   res.json({ top: store.topMatchStats(MATCH_KINDS, Math.min(30, Number(req.query.limit) || 10)) });

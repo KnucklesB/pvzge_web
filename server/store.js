@@ -89,7 +89,7 @@ function normalizeSave(text) {
  */
 class BaseStore {
   constructor() {
-    this.db = { users: {}, sessions: {}, matches: [], secret: '', scores: {}, achievements: {}, matchStats: {} };
+    this.db = { users: {}, sessions: {}, matches: [], secret: '', scores: {}, achievements: {}, matchStats: {}, matchState: {} };
     this.byName = new Map();
     setInterval(() => this.pruneSessions(), 3600 * 1000).unref();
   }
@@ -118,6 +118,7 @@ class BaseStore {
   persistScore() {}
   persistAchievements() {}
   persistMatchStats() {}
+  persistMatchState() {}
   checkWritable() {}
   flushSync() {}
   async close() {}
@@ -319,6 +320,22 @@ class BaseStore {
     return out;
   }
 
+  /* Plant Match progress of each account (partners, chats, likes…):
+     {userId: {data: JSON text, updatedAt}} */
+
+  async getMatchState(userId) {
+    const e = (this.db.matchState || {})[userId];
+    return e ? { data: e.data, updatedAt: e.updatedAt } : null;
+  }
+
+  async putMatchState(userId, data) {
+    this.db.matchState = this.db.matchState || {};
+    const updatedAt = Date.now();
+    this.db.matchState[userId] = { data, updatedAt };
+    this.persistMatchState(userId, data, updatedAt);
+    return updatedAt;
+  }
+
   /* achievements: {id: unlockedAt} per account */
 
   getAchievements(userId) {
@@ -401,6 +418,9 @@ class FileStore extends BaseStore {
     this.dirty();
   }
   persistMatchStats() {
+    this.dirty();
+  }
+  persistMatchState() {
     this.dirty();
   }
 

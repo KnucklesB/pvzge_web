@@ -161,7 +161,7 @@
 
     cards.appendChild(
       el('div.mp-panel.pvzx-mode', null, [
-        el('div.mp-panel-title', { text: '🔥 ' + t('mode_match') }),
+        el('div.mp-panel-title', { text: '🔥 ' + t('mode_match') + (X.match.unread && X.match.unread() ? '  💬 ' + X.match.unread() : '') }),
         el('p.pvzx-desc', { text: t('mode_match_desc') }),
         el('p.pvzx-muted', { text: t('match_help') }),
         X.match.best() ? el('div.pvzx-best', { text: t('match_best', { n: X.match.best() }) }) : null,

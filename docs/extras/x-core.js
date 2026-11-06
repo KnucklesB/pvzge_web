@@ -14,7 +14,7 @@
 
   var MP = window.PvZMP;
   var X = (window.PvZX = new MP.Emitter());
-  X.VERSION = '2.0.0';
+  X.VERSION = '2.1.0';
 
   /* ------------------------------------------------------------ storage */
 
@@ -31,7 +31,14 @@
       try {
         localStorage.setItem('pvzx.' + key, JSON.stringify(value));
       } catch (e) {}
+      X.store.listeners.forEach(function (f) {
+        try {
+          f(key, value);
+        } catch (e) {}
+      });
     },
+    // f(key, value) after every set (e.g. cloud sync of Plant Match).
+    listeners: [],
   };
 
   /* ----------------------------------------------------------- settings */
@@ -1105,6 +1112,12 @@
     },
     postScore: function (board, score, details) {
       return api.request('POST', '/scores/' + encodeURIComponent(board), { score: score, details: details || {} });
+    },
+    matchState: function () {
+      return api.request('GET', '/match/state');
+    },
+    putMatchState: function (state) {
+      return api.request('PUT', '/match/state', { state: state });
     },
     matchStats: function () {
       return api.request('GET', '/match/stats', undefined, { anonymous: true }).then(function (r) {

@@ -30,6 +30,8 @@
  *   branding_images  logos / images uploaded by admins (meta 'branding'
  *                  holds which game image each one replaces)
  *   match_stats    Plant Match counters per plant (likes, matches, dates…)
+ *   match_state    Plant Match progress of each account (JSON: partners,
+ *                  chats, likes…), read on demand like the saves
  *
  * Users, sessions and recent matches are cached in memory (loaded at start);
  * every change is written through. Saves are always read from the database.
@@ -125,6 +127,11 @@ const SCHEMA = [
     achievement VARCHAR(48) NOT NULL,
     unlocked_at BIGINT NOT NULL,
     PRIMARY KEY (user_id, achievement)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS match_state (
+    user_id CHAR(36) NOT NULL PRIMARY KEY,
+    data LONGTEXT NOT NULL,
+    updated_at BIGINT NOT NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS match_stats (
     code VARCHAR(48) NOT NULL,
@@ -392,6 +399,18 @@ class MariaStore extends BaseStore {
     );
   }
 
+  // Read from the database (not cached), like the saves.
+  async getMatchState(userId) {
+    const rows = await this.pool.query('SELECT data, updated_at FROM match_state WHERE user_id = ?', [userId]);
+    return rows.length ? { data: rows[0].data, updatedAt: Number(rows[0].updated_at) } : null;
+  }
+
+  async putMatchState(userId, data) {
+    const updatedAt = Date.now();
+    await this.pool.query('REPLACE INTO match_state (user_id, data, updated_at) VALUES (?, ?, ?)', [userId, data, updatedAt]);
+    return updatedAt;
+  }
+
   persistMatchStats(rows) {
     return this.enqueue('match stats', (db) => db.batch('REPLACE INTO match_stats (code, kind, n) VALUES (?, ?, ?)', rows));
   }
@@ -625,6 +644,16 @@ class MariaStore extends BaseStore {
           const r = await conn.query('INSERT IGNORE INTO achievements (user_id, achievement, unlocked_at) VALUES (?, ?, ?)', [uid, id, at]);
           out.achievements += r.affectedRows || 0;
         }
+      }
+      for (const [userId, e] of Object.entries(db.matchState || {})) {
+        const uid = idMap[userId];
+        if (!uid || !e || typeof e.data !== 'string') continue;
+        // Keep the newer progress.
+        await conn.query(
+          `INSERT INTO match_state (user_id, data, updated_at) VALUES (?, ?, ?)
+           ON DUPLICATE KEY UPDATE data = IF(VALUES(updated_at) > updated_at, VALUES(data), data), updated_at = GREATEST(updated_at, VALUES(updated_at))`,
+          [uid, e.data, Number(e.updatedAt) || 0],
+        );
       }
       for (const [code, kinds] of Object.entries(db.matchStats || {})) {
         for (const [kind, n] of Object.entries(kinds || {})) {

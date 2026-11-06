@@ -164,7 +164,7 @@
     shareCopied: { pt: 'Copiado!', en: 'Copied!', zh: '已复制！' },
     shareText: { pt: 'Meu time no Match de Plantas 💘: {names}. Código: {code}', en: 'My Plant Match team 💘: {names}. Code: {code}', zh: '我的植物配对队伍 💘：{names}。代码：{code}' },
     shareProfile: { pt: '📤 Compartilhar perfil', en: '📤 Share profile', zh: '📤 分享资料' },
-    shareProfileText: { pt: '💘 {name}, {age} · {fam} · ☀ {cost} · {pers}\n“{headline}”\nMatch de Plantas, PvZ2 Gardendless', en: '💘 {name}, {age} · {fam} · ☀ {cost} · {pers}\n“{headline}”\nPlant Match, PvZ2 Gardendless', zh: '💘 {name}，{age} · {fam} · ☀ {cost} · {pers}\n“{headline}”\n植物配对，PvZ2 Gardendless' },
+    shareProfileText: { pt: '💘 {name} · {age}{fam} · ☀ {cost} · {pers}\n“{headline}”\nMatch de Plantas, PvZ2 Gardendless', en: '💘 {name} · {age}{fam} · ☀ {cost} · {pers}\n“{headline}”\nPlant Match, PvZ2 Gardendless', zh: '💘 {name} · {age}{fam} · ☀ {cost} · {pers}\n“{headline}”\n植物配对，PvZ2 Gardendless' },
     importTitle: { pt: 'Jogar com o time de um amigo', en: 'Play a friend’s team', zh: '使用好友的队伍' },
     importPh: { pt: 'Cole o código (PM1:…)', en: 'Paste the code (PM1:…)', zh: '粘贴代码（PM1:…）' },
     importGo: { pt: 'Jogar', en: 'Play', zh: '开始' },
@@ -230,6 +230,54 @@
     giftThanks: { pt: ['Obrigada! 🥰', 'Aaah, que fofo! 💚', 'Você é demais! 😍'], en: ['Thank you! 🥰', 'Aww, so sweet! 💚', 'You’re amazing! 😍'], zh: ['谢谢！🥰', '哇，好贴心！💚', '你太棒了！😍'] },
     giftBackFood: { pt: 'Toma, um adubo pra nossa próxima fase! 🌱', en: 'Here, some plant food for our next level! 🌱', zh: '给你，下一关用的能量豆！🌱' },
     giftBackLikes: { pt: 'Presente pra você: mais curtidas! (mas só olha pra mim, hein 😏)', en: 'A gift for you: more likes! (but only look at me, okay 😏)', zh: '送你：更多喜欢！（但只能看我哦 😏）' },
+  });
+
+  /* ------------------------------------------------ texts added in 2.1 */
+
+  Object.assign(TXT, {
+    today: { pt: 'Hoje', en: 'Today', zh: '今天' },
+    yesterday: { pt: 'Ontem', en: 'Yesterday', zh: '昨天' },
+    lastSeen: { pt: 'visto por último {day} às {time}', en: 'last seen {day} at {time}', zh: '最后上线：{day} {time}' },
+    notify: { pt: '💬 {name}: {text}', en: '💬 {name}: {text}', zh: '💬 {name}：{text}' },
+    newMsgs: { pt: '💬 {n} mensagens novas no Match de Plantas', en: '💬 {n} new messages in Plant Match', zh: '💬 植物配对有 {n} 条新消息' },
+    maxPartners: { pt: '🔒 Você já tem {n} namoros', en: '🔒 You already have {n} partners', zh: '🔒 你已经有 {n} 个恋人了' },
+    synced: { pt: '☁ Progresso salvo na sua conta', en: '☁ Progress saved to your account', zh: '☁ 进度已保存到账号' },
+    localOnly: { pt: '☁ Entre numa conta para salvar namoros e conversas na nuvem', en: '☁ Log in to keep partners and chats in the cloud', zh: '☁ 登录即可在云端保存恋人和聊天' },
+  });
+
+  Object.assign(CHAT, {
+    greet: {
+      morning: { pt: ['Bom dia! ☀️ Dormiu bem?', 'Bom diaaa! Já tomou seu sol hoje? 🌞', 'Acordei pensando em você. 🌱'], en: ['Good morning! ☀️ Sleep well?', 'Morning! Had your sunshine yet? 🌞', 'Woke up thinking about you. 🌱'], zh: ['早安！☀️ 睡得好吗？', '早上好！今天晒太阳了吗？🌞', '醒来就想到你。🌱'] },
+      afternoon: { pt: ['Boa tarde! Como está o seu jardim? 🌻', 'Oi! Saudade de você. 💚', 'Tarde tranquila por aqui... e aí?'], en: ['Good afternoon! How’s your garden? 🌻', 'Hi! I miss you. 💚', 'Quiet afternoon here... what’s up?'], zh: ['下午好！你的花园怎么样？🌻', '嗨！想你了。💚', '这里的下午很安静……你呢？'] },
+      night: { pt: ['Boa noite! 🌙 Ainda acordado?', 'A lua está linda hoje. Pensei em você. 🌙', 'Boa noite... sem zumbis nos sonhos, tá? 😴'], en: ['Good evening! 🌙 Still up?', 'The moon is beautiful tonight. Thought of you. 🌙', 'Good night... no zombies in your dreams, okay? 😴'], zh: ['晚上好！🌙 还没睡吗？', '今晚的月亮好美，想到了你。🌙', '晚安……梦里不要有僵尸哦。😴'] },
+    },
+    // The question of the day of each partner: answers good / so-so / bad.
+    daily: [
+      { q: { pt: 'O que vamos fazer hoje?', en: 'What are we doing today?', zh: '今天我们做什么？' }, a: [
+        { q: 'good', pt: 'Defender o jardim juntos 🌻', en: 'Defend the garden together 🌻', zh: '一起守护花园 🌻' },
+        { q: 'meh', pt: 'Ver os zumbis passarem', en: 'Watch the zombies go by', zh: '看僵尸路过' },
+        { q: 'bad', pt: 'Sei lá, tanto faz', en: 'Dunno, whatever', zh: '不知道，随便' } ] },
+      { q: { pt: 'Sonhei com você e um monte de sol ☀️ E você, sonhou com o quê?', en: 'I dreamed of you and lots of sun ☀️ What did you dream of?', zh: '我梦见你和好多阳光 ☀️ 你梦见了什么？' }, a: [
+        { q: 'good', pt: 'Com você, claro 💚', en: 'You, of course 💚', zh: '当然是你 💚' },
+        { q: 'meh', pt: 'Com zumbis 🧟', en: 'Zombies 🧟', zh: '僵尸 🧟' },
+        { q: 'bad', pt: 'Não lembro', en: 'Can’t remember', zh: '不记得了' } ] },
+      { q: { pt: 'Como foi seu dia?', en: 'How was your day?', zh: '你今天过得怎么样？' }, a: [
+        { q: 'good', pt: 'Melhor agora que você mandou mensagem 🥰', en: 'Better now that you texted 🥰', zh: '收到你的消息就更好了 🥰' },
+        { q: 'meh', pt: 'Cansativo...', en: 'Tiring...', zh: '有点累……' },
+        { q: 'bad', pt: 'Ocupado demais pra conversar', en: 'Too busy to talk', zh: '太忙了没空聊' } ] },
+      { q: { pt: 'Se a gente fosse para um mundo novo, qual seria?', en: 'If we went to a new world, which one?', zh: '如果我们去一个新世界，会是哪里？' }, a: [
+        { q: 'good', pt: 'Qualquer um, desde que seja com você', en: 'Any, as long as it’s with you', zh: '只要和你一起，哪里都行' },
+        { q: 'meh', pt: 'Futuro Distante 🚀', en: 'Far Future 🚀', zh: '遥远的未来 🚀' },
+        { q: 'bad', pt: 'Prefiro ficar em casa sozinho', en: 'I’d rather stay home alone', zh: '我宁愿一个人待在家' } ] },
+      { q: { pt: 'Você ainda pensa em mim quando joga com outras plantas? 🥺', en: 'Do you still think of me when you play with other plants? 🥺', zh: '你和别的植物玩的时候还会想我吗？🥺' }, a: [
+        { q: 'good', pt: 'Sempre! 💕', en: 'Always! 💕', zh: '一直都会！💕' },
+        { q: 'meh', pt: 'Às vezes', en: 'Sometimes', zh: '有时候' },
+        { q: 'bad', pt: 'Nem um pouco', en: 'Not at all', zh: '一点也不' } ] },
+      { q: { pt: 'Qual zumbi você acha mais feio? 😂', en: 'Which zombie do you think is the ugliest? 😂', zh: '你觉得哪个僵尸最丑？😂' }, a: [
+        { q: 'good', pt: 'Todos, perto de você ninguém é bonito 😍', en: 'All of them, next to you nobody is pretty 😍', zh: '在你身边，谁都不好看 😍' },
+        { q: 'meh', pt: 'O do balde 🪣', en: 'The bucket one 🪣', zh: '戴铁桶的那个 🪣' },
+        { q: 'bad', pt: 'Pergunta boba', en: 'Silly question', zh: '无聊的问题' } ] },
+    ],
   });
 
   // Personalities: the openers and reactions of each plant, her favorite
