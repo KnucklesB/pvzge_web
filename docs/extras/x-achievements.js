@@ -46,6 +46,8 @@
     { id: 'inverted_win', icon: '🔄', check: function (s) { return s.mode === 'inverted' && won(s); } },
     { id: 'match_win', icon: '💘', check: function (s) { return s.mode === 'match' && won(s); } },
     { id: 'match_full', icon: '💞', check: function (s) { return s.mode === 'match' && s.matchTeam >= 8; } },
+    { id: 'match_partner', icon: '💍', check: function (s) { return s.mode === 'matchdate' && won(s); } },
+    { id: 'match_chat', icon: '💬', check: function () { return false; } },
     { id: 'mirror_win', icon: '🪞', check: function (s) { return s.mode === 'mirror' && won(s); } },
     { id: 'speed_demon', icon: '⚡', check: function (s) { return won(s) && campaignLike(s) && s.maxSpeed >= 4; } },
   ];
@@ -74,6 +76,8 @@
       mutated: ['Mutante', 'Vença uma fase com 3 ou mais mutadores.'],
       match_win: ['Amor à primeira vista', 'Vença uma fase do Match de Plantas.'],
       match_full: ['Coração cheio', 'Jogue o Match de Plantas com 8 matches.'],
+      match_partner: ['Namoro sério', 'Vença um encontro do Match de Plantas.'],
+      match_chat: ['Papo perfeito', 'Chegue a 3 corações de afinidade numa conversa.'],
       mirror_win: ['Do outro lado', 'Vença o Modo Espelhado.'],
       inverted_win: ['Mundo invertido', 'Vença o Modo Invertido.'],
       speed_demon: ['Pisando fundo', 'Vença uma fase jogando a 4x ou mais.'],
@@ -101,6 +105,8 @@
       mutated: ['Mutant', 'Win a level with 3 or more mutators.'],
       match_win: ['Love at first sight', 'Win a Plant Match level.'],
       match_full: ['Full heart', 'Play Plant Match with 8 matches.'],
+      match_partner: ['Going steady', 'Win a Plant Match date.'],
+      match_chat: ['Smooth talker', 'Reach 3 affinity hearts in a chat.'],
       mirror_win: ['Through the looking glass', 'Win the Mirrored Mode.'],
       inverted_win: ['Upside down', 'Win the Inverted Mode.'],
       speed_demon: ['Pedal to the metal', 'Win a level playing at 4x or faster.'],
@@ -128,6 +134,8 @@
       mutated: ['变异体', '启用 3 个以上变异赢得关卡。'],
       match_win: ['一见钟情', '赢得一局植物配对。'],
       match_full: ['满心欢喜', '带着 8 个配对进行植物配对。'],
+      match_partner: ['确定关系', '赢得一次植物配对约会。'],
+      match_chat: ['聊天高手', '在聊天中达到 3 颗好感心。'],
       mirror_win: ['镜中世界', '赢得镜像模式。'],
       inverted_win: ['颠倒世界', '赢得反转模式。'],
       speed_demon: ['油门踩到底', '以 4 倍或更快速度赢得关卡。'],
@@ -192,6 +200,9 @@
     ach.emit('change');
     ach.sync();
   }
+
+  // For achievements unlocked outside a level end (e.g. Plant Match chat).
+  ach.unlockExtra = unlock;
 
   function toast(id) {
     var a = ach.LIST.find(function (x) {
