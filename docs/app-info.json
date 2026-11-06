@@ -1,0 +1,51 @@
+{
+  "Version": "0.16.15",
+  "Name": "PvZ2_Prerelease_GitHubLevels",
+  "Updates": [
+    {
+      "en": "!! ATTENTION !! This update will migrate the save file path. There are two methods as follows:",
+      "zh": "！！注意！！本次更新将要迁移存档路径！！有以下两种方法："
+    },
+    {
+      "en": "\t\t1. (Recommended) Go to the path: %APPDATA%\\win, and rename this folder to \"pvz2_ge_electron.\"",
+      "zh": "\t\t1. （推荐）前往路径：%APPDATA%\\win，将这个文件夹重命名为 pvz2_ge_electron。"
+    },
+    {
+      "en": "\t\t2. Open the old game version and export each save file one by one; then open the new game version and import the exported save files one by one.",
+      "zh": "\t\t2. 打开旧的游戏版本，将其中的每一个存档一一导出；打开新的游戏版本，将导出的存档一一导入。"
+    },
+    {
+      "en": "Added Epic Levels for Mega Gatling Pea(by the community).",
+      "zh": "新增超级机枪史诗任务（由社区制作）。"
+    },
+    {
+      "en": "Added a GitHub Levels window. The levels will be updated frequently and automatically, and you can also go to GitHub to upload levels.",
+      "zh": "加入 Github 关卡窗口，其中的关卡会时常自动更新，亦可前往 GitHub 上传关卡。"
+    },
+    {
+      "en": "Fixed various bugs in 0.16.0. Thank you all for testing.",
+      "zh": "修复了 0.16.0 的各种已知问题，感谢各位的测试。"
+    },
+    {
+      "en": "Fixed exported player datas being cut off.",
+      "zh": "修复了存档导出被截断的问题。"
+    },
+    {
+      "en": "Added Recommended Card Decks and Challenging Card Decks for Far Future Levels.",
+      "zh": "为遥远未来关卡加入推荐卡组和挑战卡组。"
+    },
+    {
+      "en": "Added Music Packs function for Setting Window.",
+      "zh": "为设置窗口新增音乐包功能。"
+    },
+    {
+      "en": "Fixed level schedulers not stopping when they should (e.g. Aerial Fortress 28).",
+      "zh": "修复了计时器不截至的问题（例如云端堡垒28天）。"
+    },
+    {
+      "en": "Fixed jam music not changing.",
+      "zh": "修复切换舞台效果时音乐不切换问题。"
+    }
+  ],
+  "BuildTime": "2026-11-06T04:59:11.871Z"
+}

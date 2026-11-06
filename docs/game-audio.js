@@ -1,3 +1,6 @@
+import { initializeGamePlatform } from './game-platform.js';
+import { initializeMusicPacks } from './game-music-packs.js';
+
 // Audio pool from the 0.16.0 Electron renderer, using bundled same-origin media.
 const AUDIO_POOL_SIZE = 60;
 const DEFAULT_VOLUME = 0.9;
@@ -9,6 +12,7 @@ export class AudioEngine {
         this.pool = [];
         this.nextId = 1;
         this.byId = new Map();
+        this.externalClips = new Map();
     }
 
     async init() {
@@ -31,8 +35,13 @@ export class AudioEngine {
     }
 
     nameToPath(name) {
-        return this.manifest[name] ?? null;
+        const builtin = this.manifest[name];
+        return builtin ? new URL(builtin.split('/').map(encodeURIComponent).join('/'), this.audioRoot).href : this.externalClips.get(name) ?? null;
     }
+
+    registerExternalClip(key, url) { this.externalClips.set(key, url); }
+
+    unregisterExternalClip(key) { this.externalClips.delete(key); }
 
     getFreeSlot() {
         return this.pool.find(s => !s.playing) || null;
@@ -50,7 +59,7 @@ export class AudioEngine {
             console.warn('[audio] unknown clip:', name);
             return null;
         }
-        const src = new URL(relPath.split('/').map(encodeURIComponent).join('/'), this.audioRoot).href;
+        const src = relPath;
 
         const el = slot.el;
         if (slot.restartTimer) { clearTimeout(slot.restartTimer); slot.restartTimer = null; }
@@ -238,7 +247,7 @@ export class AudioEngine {
     }
 
     listClips() {
-        return Object.keys(this.manifest);
+        return [...Object.keys(this.manifest), ...this.externalClips.keys()];
     }
 }
 
@@ -249,4 +258,5 @@ export async function initializeGameAudio() {
     const engine = new AudioEngine(await response.json(), audioRoot);
     await engine.init();
     window.audioEngine = engine;
+    initializeGamePlatform(initializeMusicPacks());
 }
