@@ -25,7 +25,7 @@
           });
       }),
     ).then(function () {
-      [X.play, X.modes, X.inverted, X.achievements, X.ui].forEach(function (part) {
+      [X.play, X.modes, X.inverted, X.match, X.achievements, X.ui].forEach(function (part) {
         try {
           part.init();
         } catch (e) {

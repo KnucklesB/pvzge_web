@@ -159,6 +159,18 @@
       ]),
     );
 
+    cards.appendChild(
+      el('div.mp-panel.pvzx-mode', null, [
+        el('div.mp-panel-title', { text: '🔥 ' + t('mode_match') }),
+        el('p.pvzx-desc', { text: t('mode_match_desc') }),
+        el('p.pvzx-muted', { text: t('match_help') }),
+        X.match.best() ? el('div.pvzx-best', { text: t('match_best', { n: X.match.best() }) }) : null,
+        el('button.mp-btn.mp-green', { text: t('play'), onclick: function () {
+          X.match.open();
+        } }),
+      ]),
+    );
+
     var daily = el('div.mp-panel.pvzx-mode', null, [el('div.mp-panel-title', { text: '📅 ' + t('mode_daily') }), el('p.pvzx-desc', { text: t('mode_daily_desc') })]);
     var dailyInfo = el('div.pvzx-daily', { text: t('loading') });
     daily.appendChild(dailyInfo);
@@ -310,6 +322,9 @@
         return t('points', { n: n });
       }));
       wrap.appendChild(board(t('ranking_mirror'), 'challenge:mirror', function (n) {
+        return t('points', { n: n });
+      }));
+      wrap.appendChild(board(t('ranking_match'), 'challenge:match', function (n) {
         return t('points', { n: n });
       }));
     });
