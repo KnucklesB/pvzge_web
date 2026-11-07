@@ -408,6 +408,84 @@
     },
   });
 
+  /* ------------------------------------------------ texts added in 2.3 */
+
+  // Player profile customization and photos.
+  TXT.pf = {
+    photos: { pt: 'Suas fotos', en: 'Your photos', zh: '你的照片' },
+    photosOff: { pt: 'Este servidor não aceita fotos de jogadores. Sua foto é a planta favorita.', en: 'This server does not accept player photos. Your picture is your favorite plant.', zh: '此服务器不接受玩家照片。你的头像是最喜欢的植物。' },
+    photosApprove: { pt: 'A primeira foto é a principal. Fotos novas só aparecem para os outros depois que um administrador aprovar (⏳). Não envie fotos de outras pessoas nem dados pessoais.', en: 'The first photo is the main one. New photos only show to others after an admin approves them (⏳). Don’t send photos of other people or personal data.', zh: '第一张是主照片。新照片需管理员审核（⏳）后才对他人可见。请勿上传他人照片或个人信息。' },
+    photosOpen: { pt: 'A primeira foto é a principal. Não envie fotos de outras pessoas nem dados pessoais.', en: 'The first photo is the main one. Don’t send photos of other people or personal data.', zh: '第一张是主照片。请勿上传他人照片或个人信息。' },
+    rejected: { pt: '{n} foto(s) recusada(s) pela moderação.', en: '{n} photo(s) rejected by the moderators.', zh: '{n} 张照片未通过审核。' },
+    approved: { pt: 'Aprovada', en: 'Approved', zh: '已通过' },
+    pending: { pt: 'Aguardando aprovação', en: 'Waiting for approval', zh: '等待审核' },
+    makeMain: { pt: 'Tornar principal', en: 'Make main', zh: '设为主照片' },
+    useIt: { pt: 'Usar no perfil', en: 'Use in the profile', zh: '用于资料' },
+    remove: { pt: 'Apagar', en: 'Delete', zh: '删除' },
+    removeAsk: { pt: 'Apagar esta foto?', en: 'Delete this photo?', zh: '删除这张照片？' },
+    addPhoto: { pt: 'Adicionar', en: 'Add', zh: '添加' },
+    photoOk: { pt: 'Foto adicionada! Lembre de salvar o perfil.', en: 'Photo added! Remember to save the profile.', zh: '照片已添加！记得保存资料。' },
+    photoPending: { pt: 'Foto enviada para aprovação. Lembre de salvar o perfil.', en: 'Photo sent for approval. Remember to save the profile.', zh: '照片已提交审核。记得保存资料。' },
+    photoErr: {
+      too_large: { pt: 'Foto grande demais.', en: 'Photo too large.', zh: '照片太大。' },
+      too_many: { pt: 'Você já tem 6 fotos. Apague uma antes.', en: 'You already have 6 photos. Delete one first.', zh: '你已有 6 张照片，请先删除一张。' },
+      bad_image: { pt: 'Esse arquivo não é uma imagem válida.', en: 'That file is not a valid image.', zh: '该文件不是有效图片。' },
+      photos_off: { pt: 'Este servidor não aceita fotos.', en: 'This server does not accept photos.', zh: '此服务器不接受照片。' },
+      other: { pt: 'Não foi possível enviar a foto.', en: 'Could not send the photo.', zh: '无法上传照片。' },
+    },
+    nick: { pt: 'Apelido', en: 'Nickname', zh: '昵称' },
+    pronouns: { pt: 'Pronomes', en: 'Pronouns', zh: '代词' },
+    pron: {
+      ele: { pt: 'ele/dele', en: 'he/him', zh: '他' },
+      ela: { pt: 'ela/dela', en: 'she/her', zh: '她' },
+      elu: { pt: 'elu/delu', en: 'they/them', zh: 'TA' },
+      any: { pt: 'qualquer um', en: 'any', zh: '都可以' },
+    },
+    mood: { pt: 'Humor', en: 'Mood', zh: '心情' },
+    color: { pt: 'Cor do perfil', en: 'Profile color', zh: '资料颜色' },
+    colors: {
+      pink: { pt: 'Rosa', en: 'Pink', zh: '粉色' },
+      sun: { pt: 'Sol', en: 'Sun', zh: '阳光' },
+      leaf: { pt: 'Folha', en: 'Leaf', zh: '叶绿' },
+      sky: { pt: 'Céu', en: 'Sky', zh: '天蓝' },
+      night: { pt: 'Noite', en: 'Night', zh: '夜紫' },
+      zombie: { pt: 'Zumbi', en: 'Zombie', zh: '僵尸绿' },
+    },
+    interests: { pt: 'Interesses', en: 'Interests', zh: '兴趣' },
+    int: {
+      strategy: { pt: '🧠 Estratégia', en: '🧠 Strategy', zh: '🧠 策略' },
+      speedrun: { pt: '⏱ Speedrun', en: '⏱ Speedrun', zh: '⏱ 速通' },
+      survival: { pt: '🌊 Sobrevivência', en: '🌊 Survival', zh: '🌊 生存' },
+      multiplayer: { pt: '🤝 Multijogador', en: '🤝 Multiplayer', zh: '🤝 多人' },
+      achievements: { pt: '🏆 Conquistas', en: '🏆 Achievements', zh: '🏆 成就' },
+      collect: { pt: '🌱 Colecionar plantas', en: '🌱 Collecting plants', zh: '🌱 收集植物' },
+      sandbox: { pt: '🧪 Sandbox', en: '🧪 Sandbox', zh: '🧪 沙盒' },
+      chill: { pt: '☕ Jogar de boa', en: '☕ Chill games', zh: '☕ 休闲' },
+      music: { pt: '🎵 Trilha sonora', en: '🎵 Soundtrack', zh: '🎵 配乐' },
+      memes: { pt: '😂 Memes', en: '😂 Memes', zh: '😂 梗图' },
+      art: { pt: '🎨 Fan art', en: '🎨 Fan art', zh: '🎨 同人画' },
+      history: { pt: '📜 História do PvZ', en: '📜 PvZ lore', zh: '📜 PvZ 历史' },
+    },
+    world: { pt: 'Mundo favorito', en: 'Favorite world', zh: '最爱世界' },
+    prompts: { pt: 'Perguntas do perfil', en: 'Profile prompts', zh: '资料问答' },
+    answerPh: { pt: 'Sua resposta…', en: 'Your answer…', zh: '你的回答…' },
+    q: {
+      lucky: { pt: 'Minha planta da sorte é…', en: 'My lucky plant is…', zh: '我的幸运植物是…' },
+      secret: { pt: 'Minha estratégia secreta…', en: 'My secret strategy…', zh: '我的秘密策略…' },
+      hate: { pt: 'O zumbi que eu mais odeio…', en: 'The zombie I hate the most…', zh: '我最讨厌的僵尸…' },
+      date: { pt: 'Um encontro perfeito seria…', en: 'A perfect date would be…', zh: '完美的约会是…' },
+      song: { pt: 'A música que me define…', en: 'The song that defines me…', zh: '代表我的歌…' },
+      first: { pt: 'Comecei a jogar quando…', en: 'I started playing when…', zh: '我开始玩是在…' },
+    },
+    mod: { pt: 'Moderação', en: 'Moderation', zh: '审核' },
+    modSummary: { pt: '{p} foto(s) para aprovar · {r} denúncia(s)', en: '{p} photo(s) to approve · {r} report(s)', zh: '{p} 张待审照片 · {r} 条举报' },
+    modPhotos: { pt: 'Fotos aguardando aprovação ({n})', en: 'Photos waiting for approval ({n})', zh: '待审核照片（{n}）' },
+    modNone: { pt: 'Nenhuma foto para aprovar.', en: 'No photos to approve.', zh: '没有待审核的照片。' },
+    modReports: { pt: 'Denúncias ({n})', en: 'Reports ({n})', zh: '举报（{n}）' },
+    approve: { pt: 'Aprovar', en: 'Approve', zh: '通过' },
+    reject: { pt: 'Recusar', en: 'Reject', zh: '拒绝' },
+  };
+
   // Personalities: the openers and reactions of each plant, her favorite
   // sticker and how easily she ghosts after a bad reply.
   var PERS = {

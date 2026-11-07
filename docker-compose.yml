@@ -29,6 +29,8 @@ services:
       ADMIN_USERS: "${ADMIN_USERS:-}"
       # "all" lets every logged-in player import save files (default: admins).
       SAVE_IMPORT: "${SAVE_IMPORT:-admins}"
+      # Plant Match player photos: approve (an admin approves each), open or off
+      MATCH_PHOTOS: "${MATCH_PHOTOS:-approve}"
       # External MariaDB. On the first start against an empty database the
       # accounts and saves of the multiplayer-data volume are imported; at any
       # time `docker compose exec multiplayer node cli.js import-legacy /data`

@@ -90,7 +90,7 @@ function normalizeSave(text) {
  */
 class BaseStore {
   constructor() {
-    this.db = { users: {}, sessions: {}, matches: [], secret: '', scores: {}, achievements: {}, matchStats: {}, matchState: {}, matchProfiles: {}, dms: [], dmSeq: 0, matchReports: [] };
+    this.db = { users: {}, sessions: {}, matches: [], secret: '', scores: {}, achievements: {}, matchStats: {}, matchState: {}, matchProfiles: {}, dms: [], dmSeq: 0, matchReports: [], matchPhotos: {} };
     this.byName = new Map();
     setInterval(() => this.pruneSessions(), 3600 * 1000).unref();
   }
@@ -404,6 +404,59 @@ class BaseStore {
 
   async listMatchReports() {
     return (this.db.matchReports || []).slice().reverse();
+  }
+
+  /* Player photos: {id: {owner, mime, size, at, status}} (status pending,
+     approved or rejected); FileStore keeps the bytes in DATA_DIR/match-photos. */
+
+  photosDir() {
+    const dir = path.join(this.dir, 'match-photos');
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  matchPhotoMeta(id) {
+    return (this.db.matchPhotos || {})[id] || null;
+  }
+
+  listMatchPhotos(filter) {
+    return Object.entries(this.db.matchPhotos || {})
+      .map(([id, m]) => Object.assign({ id }, m))
+      .filter(filter || (() => true))
+      .sort((a, b) => a.at - b.at);
+  }
+
+  async putMatchPhoto(id, owner, mime, buf, status) {
+    atomicWrite(path.join(this.photosDir(), id), buf);
+    this.db.matchPhotos[id] = { owner, mime, size: buf.length, at: Date.now(), status };
+    this.dirty();
+  }
+
+  async getMatchPhoto(id) {
+    const m = this.matchPhotoMeta(id);
+    if (!m) return null;
+    try {
+      return Object.assign({ data: fs.readFileSync(path.join(this.photosDir(), id)) }, m);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async setMatchPhotoStatus(id, status) {
+    const m = this.matchPhotoMeta(id);
+    if (!m) return false;
+    m.status = status;
+    this.dirty();
+    return true;
+  }
+
+  async deleteMatchPhoto(id) {
+    if (!this.matchPhotoMeta(id)) return;
+    delete this.db.matchPhotos[id];
+    try {
+      fs.unlinkSync(path.join(this.photosDir(), id));
+    } catch (e) {}
+    this.dirty();
   }
 
   /* achievements: {id: unlockedAt} per account */

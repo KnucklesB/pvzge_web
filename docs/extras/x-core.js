@@ -14,7 +14,7 @@
 
   var MP = window.PvZMP;
   var X = (window.PvZX = new MP.Emitter());
-  X.VERSION = '2.2.0';
+  X.VERSION = '2.3.0';
 
   /* ------------------------------------------------------------ storage */
 
@@ -1114,9 +1114,25 @@
       return api.request('POST', '/scores/' + encodeURIComponent(board), { score: score, details: details || {} });
     },
     // Plant Match players: profiles and private messages.
+    // {profile, photos: [{id, status}], rejected: [ids], photosMode}
     matchMe: function () {
-      return api.request('GET', '/match/me').then(function (r) {
-        return r.profile;
+      return api.request('GET', '/match/me');
+    },
+    uploadPhoto: function (dataUrl) {
+      return api.request('POST', '/match/photo', { data: dataUrl });
+    },
+    deletePhoto: function (id) {
+      return api.request('DELETE', '/match/photo/' + id);
+    },
+    adminPhotos: function (status) {
+      return api.request('GET', '/admin/match/photos?status=' + (status || 'pending'));
+    },
+    setPhotoStatus: function (id, status) {
+      return api.request('POST', '/admin/match/photos/' + id, { status: status });
+    },
+    matchReports: function () {
+      return api.request('GET', '/admin/match/reports').then(function (r) {
+        return r.reports || [];
       });
     },
     putMatchProfile: function (p) {

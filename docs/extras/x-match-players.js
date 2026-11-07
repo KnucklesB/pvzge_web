@@ -95,8 +95,12 @@
     if (!I.pmOn() || pm.loaded) return Promise.resolve(pm.me);
     return X.api
       .matchMe()
-      .then(function (p) {
+      .then(function (r) {
+        var p = r.profile;
         pm.me = p;
+        pm.photosMode = r.photosMode || 'off';
+        pm.myPhotos = r.photos || [];
+        pm.rejected = r.rejected || [];
         pm.loaded = true;
         if (p) pm.meName = p.name;
         return p;
@@ -114,6 +118,9 @@
       .matchPlayers()
       .then(function (list) {
         pm.players = list;
+        list.forEach(function (p) {
+          pm.profiles[p.name] = p;
+        });
         I.pmRender();
       })
       .catch(function () {});
@@ -242,6 +249,76 @@
     return art ? el('img', { src: art.toDataURL(), alt: '' }) : el('span', { text: '👤' });
   }
 
+  /* ------------------------------------------------------------ photos */
+
+  I.photoUrl = function photoUrl(id) {
+    return MP.config.api + '/match/photo/' + id;
+  };
+
+  // Photos not approved yet are only served to their owner and admins,
+  // with the login: fetched into a blob URL.
+  pm.blobs = {};
+  I.privatePhoto = function privatePhoto(id) {
+    var img = el('img', { alt: '' });
+    if (pm.blobs[id]) {
+      img.src = pm.blobs[id];
+      return img;
+    }
+    var auth = MP.store.get('auth', null);
+    fetch(I.photoUrl(id), { headers: auth && auth.token ? { Authorization: 'Bearer ' + auth.token } : {} })
+      .then(function (r) {
+        if (!r.ok) throw new Error(r.status);
+        return r.blob();
+      })
+      .then(function (b) {
+        pm.blobs[id] = URL.createObjectURL(b);
+        img.src = pm.blobs[id];
+      })
+      .catch(function () {});
+    return img;
+  };
+
+  // The player's picture: their first photo, or their favorite plant.
+  I.playerPic = function playerPic(p, own) {
+    var ph = p && p.photos && p.photos[0];
+    if (ph) return own ? I.privatePhoto(ph) : el('img.pvzx-photo', { src: I.photoUrl(ph), alt: '' });
+    return plantImg(p && p.plant);
+  };
+
+  var COLORS = { pink: '#ff3d8b', sun: '#ffa41b', leaf: '#2fae45', sky: '#2d93e6', night: '#6b4bd8', zombie: '#6f8f4e' };
+  I.playerColor = function playerColor(p) {
+    return COLORS[(p && p.color) || 'pink'] || COLORS.pink;
+  };
+
+  // "Aninha 🌻 😎" (and @ana when there is a nickname).
+  I.playerName = function playerName(p, withHandle) {
+    if (!p) return '';
+    var n = (p.nick || p.name) + (p.mood ? ' ' + p.mood : '');
+    return withHandle && p.nick ? n + '  @' + p.name : n;
+  };
+
+  // Image file -> JPEG data URL of at most `max` px.
+  I.resizeImage = function resizeImage(file, max) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        var s = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+        var c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.naturalWidth * s));
+        c.height = Math.max(1, Math.round(img.naturalHeight * s));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        resolve(c.toDataURL('image/jpeg', 0.85));
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error('bad_image'));
+      };
+      img.src = url;
+    });
+  };
+
   function genderIcon(g) {
     return g && TRAITS.gender[g] ? TRAITS.gender[g].icon : '';
   }
@@ -257,12 +334,13 @@
     return X.t(k);
   }
 
+  // The freshest copy: the players list, then the profiles sent with messages.
   function profileOf(name) {
     return (
-      pm.profiles[name] ||
       pm.players.find(function (p) {
         return p.name === name;
       }) ||
+      pm.profiles[name] ||
       null
     );
   }
@@ -308,6 +386,10 @@
       box.appendChild(I.playerSheet(pm.viewing));
       return;
     }
+    if (pm.mod) {
+      box.appendChild(I.moderationView());
+      return;
+    }
     I.pmLoadPlayers();
     var mine = pm.me;
     box.appendChild(
@@ -315,11 +397,22 @@
         pm.editing = true;
         I.render();
       } }, [
-        el('span.pvzx-mavatar', null, [plantImg(mine.plant)]),
-        el('span.pvzx-mrow-text', null, [el('b', { text: mine.name + ' ' + genderIcon(mine.gender) + ' · ' + L(TXT.pmYou) }), el('span', { text: (mine.visible ? '' : '🙈 ' + L(TXT.pmHidden) + ' · ') + (mine.bio || L(TXT.pmEdit)) })]),
+        el('span.pvzx-mavatar', { style: 'border-color:' + I.playerColor(mine) }, [I.playerPic(mine, true)]),
+        el('span.pvzx-mrow-text', null, [el('b', { text: I.playerName(mine) + ' ' + genderIcon(mine.gender) + ' · ' + L(TXT.pmYou) }), el('span', { text: (mine.visible ? '' : '🙈 ' + L(TXT.pmHidden) + ' · ') + (mine.bio || L(TXT.pmEdit)) })]),
         el('span.pvzx-mrow-aff', { text: '✏️' }),
       ]),
     );
+    if (I.isAdmin()) {
+      if (!pm.modAt || Date.now() - pm.modAt > 60000) I.loadModeration();
+      var pending = (pm.modPhotos || []).length;
+      box.appendChild(
+        el('button.pvzx-mrow.pvzx-me', { onclick: function () {
+          pm.mod = true;
+          I.loadModeration();
+          I.render();
+        } }, [el('span.pvzx-mavatar', { text: '🛡' }), el('span.pvzx-mrow-text', null, [el('b', { text: L(TXT.pf.mod) }), el('span', { text: L(TXT.pf.modSummary, { p: pending, r: (pm.modReports || []).length }) })]), pending ? el('i.pvzx-badge-n', { text: String(pending) }) : null]),
+      );
+    }
     // Conversations, the newest first.
     var names = Object.keys(pm.msgs).sort(function (a, b) {
       var la = pm.msgs[a][pm.msgs[a].length - 1];
@@ -338,9 +431,9 @@
           I.pmMarkRead(n);
           I.render();
         } }, [
-          el('span.pvzx-mavatar', null, [plantImg(p && p.plant)]),
+          el('span.pvzx-mavatar', { style: 'border-color:' + I.playerColor(p) }, [I.playerPic(p || { name: n })]),
           p && p.online ? el('i.pvzx-dot') : null,
-          el('span.pvzx-mrow-text', null, [el('b', { text: n + ' ' + genderIcon(p && p.gender) }), el('span', { text: (last.from === pm.meName ? '↪ ' : '') + last.text })]),
+          el('span.pvzx-mrow-text', null, [el('b', { text: (p ? I.playerName(p) : n) + ' ' + genderIcon(p && p.gender) }), el('span', { text: (last.from === pm.meName ? '↪ ' : '') + last.text })]),
           el('span.pvzx-mrow-aff', null, [el('small', { text: I.hhmm(last.at) }), unread ? el('i.pvzx-badge-n', { text: String(unread) }) : null]),
         ]),
       );
@@ -354,10 +447,10 @@
           pm.viewing = p.name;
           I.render();
         } }, [
-          el('span.pvzx-mavatar', null, [plantImg(p.plant)]),
+          el('span.pvzx-mavatar', { style: 'border-color:' + I.playerColor(p) }, [I.playerPic(p)]),
           p.online ? el('i.pvzx-dot') : null,
           el('span.pvzx-mrow-text', null, [
-            el('b', { text: p.name + ' ' + genderIcon(p.gender) + (p.partner ? '  ' + (STAGES[p.rel] ? STAGES[p.rel].icon : '💍') + ' ' + X.plantName(p.partner) : '') }),
+            el('b', { text: I.playerName(p) + ' ' + genderIcon(p.gender) + (p.partner ? '  ' + (STAGES[p.rel] ? STAGES[p.rel].icon : '💍') + ' ' + X.plantName(p.partner) : '') }),
             el('span', { text: p.bio || statusOf(p) }),
           ]),
           el('span.pvzx-mrow-aff', null, [el('small', { text: p.online ? '🟢' : I.hhmm(p.lastSeen) })]),
@@ -368,20 +461,60 @@
 
   I.playerSheet = function playerSheet(name) {
     var p = profileOf(name) || { name: name };
+    var P = TXT.pf;
     var rows = [];
+    if (p.pronouns) rows.push(['🏷', L(P.pronouns), L(P.pron[p.pronouns])]);
     if (p.gender) rows.push([genderIcon(p.gender), L(TRAITS.labels.gender), L(TRAITS.gender[p.gender])]);
     if (p.interest) rows.push(['🔎', L(TRAITS.labels.lookingFor), L(TRAITS.interest[p.interest])]);
+    if (p.world) rows.push(['🗺', L(P.world), X.t('world_' + p.world)]);
     if (p.partner) rows.push([STAGES[p.rel] ? STAGES[p.rel].icon : '💍', L(TXT.tabPartners), X.plantName(p.partner) + (STAGES[p.rel] ? ' · ' + L(STAGES[p.rel].name) : '')]);
     if (p.points) rows.push(['💞', L(TXT.rankCouple), String(p.points)]);
-    return el('div.pvzx-psheet', null, [
+    var photos = p.photos || [];
+    var idx = Math.min(pm.sheetPhoto || 0, Math.max(0, photos.length - 1));
+    var pic = photos.length
+      ? el('div.pvzx-psheet-photo', { onclick: function () {
+          pm.sheetPhoto = (idx + 1) % photos.length;
+          I.render();
+        } }, [
+          el('img', { src: I.photoUrl(photos[idx]), alt: '' }),
+          photos.length > 1
+            ? el(
+                'div.pvzx-photo-bars',
+                null,
+                photos.map(function (x, i) {
+                  return el('span' + (i === idx ? '.pvzx-on' : ''));
+                }),
+              )
+            : null,
+        ])
+      : el('div.pvzx-psheet-pic', null, [plantImg(p.plant)]);
+    var color = I.playerColor(p);
+    return el('div.pvzx-psheet', { style: 'border-top: 6px solid ' + color }, [
       el('button.pvzx-x', { text: '←', onclick: function () {
         pm.viewing = null;
+        pm.sheetPhoto = 0;
         I.render();
       } }),
-      el('div.pvzx-psheet-pic', null, [plantImg(p.plant)]),
-      el('h3', { text: p.name + ' ' + genderIcon(p.gender) }),
-      el('p.pvzx-small', { text: statusOf(p) }),
+      pic,
+      el('h3', { text: I.playerName(p) + ' ' + genderIcon(p.gender), style: 'color:' + color }),
+      el('p.pvzx-small', { text: (p.nick ? '@' + p.name + ' · ' : '') + statusOf(p) }),
       p.bio ? el('p.pvzx-hand', { text: '“' + p.bio + '”' }) : null,
+      p.interests && p.interests.length
+        ? el(
+            'div.pvzx-chips',
+            null,
+            p.interests.map(function (k) {
+              return el('span.pvzx-chip.pvzx-chip-like', { text: L(P.int[k] || { pt: k }) });
+            }),
+          )
+        : null,
+      el(
+        'div.pvzx-prompts',
+        null,
+        (p.prompts || []).map(function (q) {
+          return el('div.pvzx-prompt', { style: 'border-color:' + color }, [el('small', { text: L(P.q[q.q] || { pt: q.q }) }), el('b', { text: q.a })]);
+        }),
+      ),
       el(
         'table.pvzx-sheet',
         null,
@@ -446,22 +579,141 @@
     });
   };
 
+  function textField(tag, value, max, ph, keep, onInput) {
+    var f = el(tag + '.pvzx-input', { maxlength: max, placeholder: ph || '', 'data-keep': keep, rows: tag === 'textarea' ? 3 : null });
+    f.value = value || '';
+    f.addEventListener('input', function () {
+      onInput(f.value);
+    });
+    f.addEventListener('keydown', function (e) {
+      e.stopPropagation();
+    });
+    return f;
+  }
+
+  I.photoEditor = function photoEditor(f) {
+    var P = TXT.pf;
+    if (pm.photosMode === 'off') return el('p.pvzx-small', { text: L(P.photosOff) });
+    var status = {};
+    (pm.myPhotos || []).forEach(function (x) {
+      status[x.id] = x.status;
+    });
+    // Photos in the profile first (their order), then the others uploaded.
+    var ids = f.photos.filter(function (id) {
+      return status[id];
+    });
+    Object.keys(status).forEach(function (id) {
+      if (ids.indexOf(id) < 0) ids.push(id);
+    });
+    var input = el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
+    input.addEventListener('change', function () {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      pm.uploading = true;
+      I.render();
+      I.resizeImage(file, 720)
+        .then(function (data) {
+          return X.api.uploadPhoto(data);
+        })
+        .then(function (r) {
+          if (!(pm.myPhotos || []).some(function (x) {
+            return x.id === r.id;
+          })) pm.myPhotos.push({ id: r.id, status: r.status });
+          if (f.photos.indexOf(r.id) < 0) f.photos.push(r.id);
+          if (MP.ui) MP.ui.toast(L(r.status === 'approved' ? P.photoOk : P.photoPending), 'good');
+        })
+        .catch(function (e) {
+          var code = String((e && (e.message || e.code)) || '');
+          var key = ['too_large', 'too_many', 'bad_image', 'photos_off'].find(function (k) {
+            return code.indexOf(k) >= 0;
+          });
+          if (MP.ui) MP.ui.toast(L(P.photoErr[key || 'other']), 'bad');
+        })
+        .then(function () {
+          pm.uploading = false;
+          I.render();
+        });
+    });
+    var tiles = ids.map(function (id, i) {
+      var st = status[id];
+      var used = f.photos.indexOf(id) >= 0;
+      return el('div.pvzx-ptile' + (used ? '' : '.pvzx-unused'), null, [
+        I.privatePhoto(id),
+        el('span.pvzx-ptile-badge', { text: st === 'approved' ? (i === 0 && used ? '★' : '✔') : '⏳', title: L(st === 'approved' ? P.approved : P.pending) }),
+        el('div.pvzx-ptile-btns', null, [
+          used && i > 0
+            ? el('button', { text: '★', title: L(P.makeMain), onclick: function () {
+                f.photos = [id].concat(f.photos.filter(function (x) {
+                  return x !== id;
+                }));
+                I.render();
+              } })
+            : null,
+          !used
+            ? el('button', { text: '＋', title: L(P.useIt), onclick: function () {
+                f.photos.push(id);
+                I.render();
+              } })
+            : null,
+          el('button', { text: '🗑', title: L(P.remove), onclick: function () {
+            if (!window.confirm(L(P.removeAsk))) return;
+            X.api.deletePhoto(id).then(function () {
+              pm.myPhotos = pm.myPhotos.filter(function (x) {
+                return x.id !== id;
+              });
+              f.photos = f.photos.filter(function (x) {
+                return x !== id;
+              });
+              I.render();
+            });
+          } }),
+        ]),
+      ]);
+    });
+    if (ids.length < 6) {
+      tiles.push(
+        el('button.pvzx-ptile.pvzx-padd', { disabled: !!pm.uploading, onclick: function () {
+          input.click();
+        } }, [pm.uploading ? '…' : '📷', el('small', { text: L(P.addPhoto) })]),
+      );
+    }
+    return el('div', null, [
+      el('div.pvzx-pgrid', null, tiles),
+      input,
+      el('p.pvzx-small', { text: L(pm.photosMode === 'approve' ? P.photosApprove : P.photosOpen) }),
+      pm.rejected && pm.rejected.length ? el('p.pvzx-small.pvzx-seek', { text: L(P.rejected, { n: pm.rejected.length }) }) : null,
+    ]);
+  };
+
   I.profileEditor = function profileEditor() {
     var me = pm.me || {};
+    var P = TXT.pf;
     var f = (pm.form = pm.form || {
       visible: me.visible !== false,
       gender: me.gender || M.prefs.me || '',
       interest: me.interest || 'all',
       bio: me.bio || '',
       plant: me.plant || Object.keys(I.partners())[0] || 'sunflower',
-    });
-    var bio = el('textarea.pvzx-input', { maxlength: 160, rows: 3, placeholder: L(TXT.pmBioPh), 'data-keep': 'bio' });
-    bio.value = f.bio;
-    bio.addEventListener('input', function () {
-      f.bio = bio.value;
-    });
-    bio.addEventListener('keydown', function (e) {
-      e.stopPropagation();
+      photos: (me.photos || []).slice(),
+      nick: me.nick || '',
+      pronouns: me.pronouns || '',
+      mood: me.mood || '',
+      color: me.color || 'pink',
+      interests: (me.interests || []).slice(),
+      world: me.world || '',
+      prompts: (function () {
+        // Saved answers first; empty slots suggest questions not used yet.
+        var saved = (me.prompts || []).slice(0, 3).map(function (q) {
+          return { q: q.q, a: q.a };
+        });
+        var free = Object.keys(P.q).filter(function (k) {
+          return !saved.some(function (q) {
+            return q.q === k;
+          });
+        });
+        while (saved.length < 3) saved.push({ q: free.shift(), a: '' });
+        return saved;
+      })(),
     });
     var all = MP.allPlants()
       .map(function (c) {
@@ -480,12 +732,52 @@
         return el('option', { value: x[0], text: x[1], selected: x[0] === f.plant });
       }),
     );
-    return el('div.pvzx-peditor', null, [
-      el('h3', { text: '👤 ' + L(TXT.pmProfile) }),
+    var worlds = ['frontyard', 'egypt', 'pirate', 'cowboy', 'kongfu', 'future', 'dark', 'beach', 'iceage', 'lostcity', 'eighties', 'dino', 'sky'];
+    var wsel = el(
+      'select.pvzx-input',
+      { onchange: function () {
+        f.world = wsel.value;
+      } },
+      [el('option', { value: '', text: '—' })].concat(
+        worlds.map(function (w) {
+          return el('option', { value: w, text: X.t('world_' + w), selected: w === f.world });
+        }),
+      ),
+    );
+    var prompts = f.prompts.map(function (q, i) {
+      var qs = el(
+        'select.pvzx-input',
+        { onchange: function () {
+          q.q = qs.value;
+        } },
+        Object.keys(P.q).map(function (k) {
+          return el('option', { value: k, text: L(P.q[k]), selected: k === q.q });
+        }),
+      );
+      return el('div.pvzx-prompt-edit', null, [
+        qs,
+        textField('input', q.a, 120, L(P.answerPh), 'prompt' + i, function (v) {
+          q.a = v;
+        }),
+      ]);
+    });
+    var color = I.playerColor(f);
+    return el('div.pvzx-peditor', { style: 'border-top: 6px solid ' + color }, [
+      el('h3', { text: '👤 ' + L(TXT.pmProfile), style: 'color:' + color }),
       el('p.pvzx-small', { text: L(TXT.pmProfileDesc) }),
-      el('div.pvzx-psheet-pic', null, [plantImg(f.plant)]),
-      el('h4', { text: L(TXT.pmFavPlant) }),
-      sel,
+      el('h4', { text: '📷 ' + L(P.photos) }),
+      I.photoEditor(f),
+      el('h4', { text: L(P.nick) }),
+      textField('input', f.nick, 24, me.name || '', 'nick', function (v) {
+        f.nick = v;
+      }),
+      el('h4', { text: L(P.pronouns) }),
+      I.choiceChips(['', 'ele', 'ela', 'elu', 'any'], f.pronouns, function (v) {
+        f.pronouns = v;
+        I.render();
+      }, function (v) {
+        return v ? L(P.pron[v]) : '—';
+      }),
       el('h4', { text: L(TXT.prefMe) }),
       I.choiceChips(['f', 'm', 'n', ''], f.gender, function (v) {
         f.gender = v;
@@ -500,8 +792,48 @@
       }, function (v) {
         return L(TRAITS.interest[v]);
       }),
+      el('h4', { text: L(P.mood) }),
+      I.choiceChips(['', '😎', '🥰', '😴', '🔥', '🌻', '🧟', '🎮', '☕', '🎉'], f.mood, function (v) {
+        f.mood = v;
+        I.render();
+      }, function (v) {
+        return v || '—';
+      }),
+      el('h4', { text: L(P.color) }),
+      el(
+        'div.pvzx-swatches',
+        null,
+        Object.keys(P.colors).map(function (k) {
+          return el('button' + (f.color === k ? '.pvzx-on' : ''), { title: L(P.colors[k]), style: 'background:' + I.playerColor({ color: k }), onclick: function () {
+            f.color = k;
+            I.render();
+          } });
+        }),
+      ),
       el('h4', { text: L(TXT.pmBio) }),
-      bio,
+      textField('textarea', f.bio, 160, L(TXT.pmBioPh), 'bio', function (v) {
+        f.bio = v;
+      }),
+      el('h4', { text: L(P.interests) + ' (' + f.interests.length + '/5)' }),
+      el(
+        'div.pvzx-chips',
+        null,
+        Object.keys(P.int).map(function (k) {
+          var on = f.interests.indexOf(k) >= 0;
+          return el('button.pvzx-chip.pvzx-chip-btn' + (on ? '.pvzx-on' : ''), { text: L(P.int[k]), disabled: !on && f.interests.length >= 5, onclick: function () {
+            if (on) f.interests.splice(f.interests.indexOf(k), 1);
+            else f.interests.push(k);
+            I.render();
+          } });
+        }),
+      ),
+      el('h4', { text: L(P.world) }),
+      wsel,
+      el('h4', { text: L(P.prompts) }),
+      el('div', null, prompts),
+      el('h4', { text: L(TXT.pmFavPlant) }),
+      el('div.pvzx-psheet-pic.pvzx-small-pic', null, [plantImg(f.plant)]),
+      sel,
       el('label.pvzx-check', null, [
         el('input', { type: 'checkbox', checked: f.visible, onchange: function (e) {
           f.visible = e.target.checked;
@@ -528,7 +860,24 @@
       el('div.pvzx-file-actions', null, [
         el('button.mp-btn.mp-green', { text: L(TXT.pmSave), onclick: function () {
           X.api
-            .putMatchProfile({ visible: f.visible, gender: f.gender, interest: f.interest, bio: f.bio, plant: f.plant, team: X.store.get('matchLastTeam', []) })
+            .putMatchProfile({
+              visible: f.visible,
+              gender: f.gender,
+              interest: f.interest,
+              bio: f.bio,
+              plant: f.plant,
+              team: X.store.get('matchLastTeam', []),
+              photos: f.photos,
+              nick: f.nick,
+              pronouns: f.pronouns,
+              mood: f.mood,
+              color: f.color,
+              interests: f.interests,
+              world: f.world,
+              prompts: f.prompts.filter(function (q) {
+                return q.a && q.a.trim();
+              }),
+            })
             .then(function (p) {
               p.blocked = (pm.me && pm.me.blocked) || [];
               pm.me = p;
@@ -557,6 +906,81 @@
     ]);
   };
 
+  /* -------------------------------------------------------- moderation */
+
+  // Admins: photos waiting for approval and reports.
+  I.isAdmin = function isAdmin() {
+    var u = MP.api.user && MP.api.user();
+    return !!(u && u.admin);
+  };
+
+  I.loadModeration = function loadModeration() {
+    if (!I.isAdmin() || pm.modLoading) return;
+    pm.modLoading = true;
+    Promise.all([X.api.adminPhotos('pending').catch(function () {
+      return { photos: [] };
+    }), X.api.matchReports().catch(function () {
+      return [];
+    })]).then(function (r) {
+      pm.modPhotos = r[0].photos || [];
+      pm.modReports = r[1] || [];
+      pm.modLoading = false;
+      pm.modAt = Date.now();
+      I.pmRender();
+    });
+  };
+
+  I.moderationView = function moderationView() {
+    var P = TXT.pf;
+    var box = el('div.pvzx-psheet', null, [
+      el('button.pvzx-x', { text: '←', onclick: function () {
+        pm.mod = false;
+        I.render();
+      } }),
+      el('h3', { text: '🛡 ' + L(P.mod) }),
+      el('h4', { text: L(P.modPhotos, { n: (pm.modPhotos || []).length }) }),
+    ]);
+    if (!pm.modPhotos) box.appendChild(el('p.pvzx-small', { text: '…' }));
+    else if (!pm.modPhotos.length) box.appendChild(el('p.pvzx-small', { text: L(P.modNone) }));
+    var grid = el('div.pvzx-pgrid');
+    (pm.modPhotos || []).forEach(function (ph) {
+      var decide = function (status) {
+        X.api.setPhotoStatus(ph.id, status).then(function () {
+          pm.modPhotos = pm.modPhotos.filter(function (x) {
+            return x.id !== ph.id;
+          });
+          I.render();
+        });
+      };
+      grid.appendChild(
+        el('div.pvzx-ptile.pvzx-mod', null, [
+          I.privatePhoto(ph.id),
+          el('small', { text: '@' + ph.user }),
+          el('div.pvzx-ptile-btns', null, [
+            el('button', { text: '✔', title: L(P.approve), onclick: function () {
+              decide('approved');
+            } }),
+            el('button', { text: '✖', title: L(P.reject), onclick: function () {
+              decide('rejected');
+            } }),
+          ]),
+        ]),
+      );
+    });
+    box.appendChild(grid);
+    box.appendChild(el('h4', { text: L(P.modReports, { n: (pm.modReports || []).length }) }));
+    (pm.modReports || []).slice(0, 30).forEach(function (r) {
+      box.appendChild(
+        el('div.pvzx-prompt', null, [
+          el('small', { text: new Date(r.at).toLocaleString() + ' · @' + r.reporter + ' → @' + r.target }),
+          el('b', { text: r.reason }),
+          r.excerpt ? el('small', { text: r.excerpt }) : null,
+        ]),
+      );
+    });
+    return box;
+  };
+
   I.playerChat = function playerChat(body, name) {
     var p = profileOf(name) || { name: name };
     var list = pm.msgs[name] || [];
@@ -566,8 +990,8 @@
         pm.chat = null;
         I.render();
       } }),
-      el('span.pvzx-mavatar', null, [plantImg(p.plant)]),
-      el('span.pvzx-mrow-text', null, [el('b', { text: name + ' ' + genderIcon(p.gender) }), el('span.pvzx-status' + (p.online ? '.pvzx-online' : ''), { text: statusOf(p) })]),
+      el('span.pvzx-mavatar', { style: 'border-color:' + I.playerColor(p) }, [I.playerPic(p)]),
+      el('span.pvzx-mrow-text', null, [el('b', { text: I.playerName(p.name ? p : { name: name }) + ' ' + genderIcon(p.gender) }), el('span.pvzx-status' + (p.online ? '.pvzx-online' : ''), { text: statusOf(p) })]),
       el('button.pvzx-chip.pvzx-chip-btn', { text: L(TXT.viewProfile), onclick: function () {
         pm.viewing = name;
         pm.chat = null;

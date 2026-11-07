@@ -17,6 +17,8 @@
  *   ADMIN_USERS      comma separated usernames allowed to edit saves (their
  *                    own and every player's) and to import save files
  *   SAVE_IMPORT      "admins" (default) or "all": who may import save files
+ *   MATCH_PHOTOS     Plant Match player photos: "approve" (default, an admin
+ *                    approves each one), "open" or "off"
  *   DB_HOST / DATABASE_URL  store everything in MariaDB instead of DATA_DIR
  *                    (see db-mariadb.js for DB_PORT, DB_USER, DB_PASSWORD,
  *                    DB_NAME, SAVE_HISTORY and DB_SYNC_SECONDS)
@@ -29,7 +31,7 @@ const { ExpressPeerServer } = require('peer');
 const { openStore } = require('./store');
 const auth = require('./auth');
 
-const VERSION = '4.4.0';
+const VERSION = '4.5.0';
 const PORT = Number(process.env.PORT) || 9000;
 const MAX_SAVE = (Number(process.env.MAX_SAVE_MB) || 8) * 1024 * 1024;
 const ORIGINS = (process.env.ALLOWED_ORIGINS || '*')
@@ -180,7 +182,7 @@ function optionalUser(req, res, next) {
 /* ------------------------------------------------------------------- API */
 
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, version: VERSION, storage: store.kind, features: ['accounts', 'saves', 'rooms', 'matches', 'admin', 'history', 'scores', 'achievements', 'daily', 'branding', 'matchstats', 'matchstate', 'players'] });
+  res.json({ ok: true, version: VERSION, storage: store.kind, features: ['accounts', 'saves', 'rooms', 'matches', 'admin', 'history', 'scores', 'achievements', 'daily', 'branding', 'matchstats', 'matchstate', 'players', 'photos'] });
 });
 
 // Accounts ---------------------------------------------------------------
@@ -789,6 +791,44 @@ app.get('/api/match/stats', limit('rooms', 120), (req, res) => {
 const GENDERS = ['f', 'm', 'n'];
 const ONLINE_MS = 90 * 1000;
 
+// Profile customization (the client has the texts of these keys).
+const PRONOUNS = ['ele', 'ela', 'elu', 'any'];
+const COLORS = ['pink', 'sun', 'leaf', 'sky', 'night', 'zombie'];
+const INTERESTS = ['strategy', 'speedrun', 'survival', 'multiplayer', 'achievements', 'collect', 'sandbox', 'chill', 'music', 'memes', 'art', 'history'];
+const WORLDS = ['frontyard', 'egypt', 'pirate', 'cowboy', 'kongfu', 'future', 'dark', 'beach', 'iceage', 'lostcity', 'eighties', 'dino', 'sky'];
+const PROMPTS = ['lucky', 'secret', 'hate', 'date', 'song', 'first'];
+
+// Player photos: MATCH_PHOTOS=approve (default: an admin approves each photo
+// before other players see it), open (shown right away) or off.
+const PHOTOS_MODE = ['approve', 'open', 'off'].includes((process.env.MATCH_PHOTOS || '').toLowerCase()) ? process.env.MATCH_PHOTOS.toLowerCase() : 'approve';
+const PHOTO_MIME = { 'image/jpeg': 1, 'image/png': 1, 'image/webp': 1 };
+const PHOTO_MAX = 1.5 * 1024 * 1024;
+const PHOTOS_PER_PLAYER = 6;
+const PHOTO_ID = /^[a-f0-9]{40}$/;
+const photoJson = express.json({ limit: '3mb' });
+
+function photosOf(p, owner) {
+  return (p.photos || []).filter((id) => {
+    const m = store.matchPhotoMeta(id);
+    return m && (owner ? m.status !== 'rejected' : m.status === 'approved');
+  });
+}
+
+function customFields(b) {
+  return {
+    nick: clean(b.nick, 24),
+    pronouns: PRONOUNS.includes(b.pronouns) ? b.pronouns : '',
+    mood: clean(b.mood, 8),
+    color: COLORS.includes(b.color) ? b.color : 'pink',
+    interests: (Array.isArray(b.interests) ? b.interests : []).filter((k) => INTERESTS.includes(k)).slice(0, 5),
+    world: WORLDS.includes(b.world) ? b.world : '',
+    prompts: (Array.isArray(b.prompts) ? b.prompts : [])
+      .filter((q) => q && PROMPTS.includes(q.q) && clean(q.a, 120))
+      .slice(0, 3)
+      .map((q) => ({ q: q.q, a: clean(q.a, 120) })),
+  };
+}
+
 async function bestPartner(userId) {
   const cur = readMatchState(await store.getMatchState(userId));
   const ps = (cur && cur.state.matchPartners) || {};
@@ -796,11 +836,19 @@ async function bestPartner(userId) {
   return best ? { partner: best, rel: relStage(ps[best]), points: couplePoints(ps) } : { partner: '', rel: -1, points: 0 };
 }
 
-function publicProfile(userId, p) {
+function publicProfile(userId, p, owner) {
   const u = store.getUser(userId);
   if (!u || !p) return null;
   return {
     name: u.username,
+    nick: p.nick || '',
+    pronouns: p.pronouns || '',
+    mood: p.mood || '',
+    color: p.color || 'pink',
+    interests: p.interests || [],
+    world: p.world || '',
+    prompts: p.prompts || [],
+    photos: photosOf(p, owner),
     gender: p.gender,
     interest: p.interest,
     bio: p.bio,
@@ -836,14 +884,26 @@ function blockedBetween(a, b) {
 
 app.get('/api/match/me', limit('rooms', 120), requireUser, (req, res) => {
   const p = store.getMatchProfile(req.user.id);
-  res.json({ profile: p ? Object.assign(publicProfile(req.user.id, p), { blocked: (p.blocked || []).map((id) => (store.getUser(id) || {}).username).filter(Boolean) }) : null });
+  const mine = store.listMatchPhotos((m) => m.owner === req.user.id && m.status !== 'rejected').map((m) => ({ id: m.id, status: m.status }));
+  const rejected = store.listMatchPhotos((m) => m.owner === req.user.id && m.status === 'rejected').map((m) => m.id);
+  res.json({
+    photosMode: PHOTOS_MODE,
+    photos: mine,
+    rejected,
+    profile: p ? Object.assign(publicProfile(req.user.id, p, true), { blocked: (p.blocked || []).map((id) => (store.getUser(id) || {}).username).filter(Boolean) }) : null,
+  });
 });
 
 app.put('/api/match/profile', limit('save', 30), requireUser, json, wrap(async (req, res) => {
   const b = req.body || {};
   const prev = store.getMatchProfile(req.user.id) || {};
   const bp = await bestPartner(req.user.id);
-  const prof = {
+  const ownPhotos = (Array.isArray(b.photos) ? b.photos : []).filter((id) => {
+    const m = PHOTO_ID.test(id) && store.matchPhotoMeta(id);
+    return m && m.owner === req.user.id && m.status !== 'rejected';
+  });
+  const prof = Object.assign(customFields(b), {
+    photos: [...new Set(ownPhotos)].slice(0, PHOTOS_PER_PLAYER),
     visible: !!b.visible,
     gender: GENDERS.includes(b.gender) ? b.gender : '',
     interest: GENDERS.concat(['all']).includes(b.interest) ? b.interest : 'all',
@@ -856,9 +916,9 @@ app.put('/api/match/profile', limit('save', 30), requireUser, json, wrap(async (
     blocked: prev.blocked || [],
     lastSeen: Date.now(),
     savedSeen: Date.now(),
-  };
+  });
   store.putMatchProfile(req.user.id, prof);
-  res.json({ profile: publicProfile(req.user.id, prof) });
+  res.json({ profile: publicProfile(req.user.id, prof, true) });
 }));
 
 app.get('/api/match/players', limit('rooms', 120), requireUser, (req, res) => {
@@ -940,6 +1000,83 @@ app.post('/api/match/report', limit('save', 10), requireUser, json, (req, res) =
   console.log('[report] %s reported %s', req.user.username, other.username);
   res.json({ ok: true });
 });
+
+// Photos ---------------------------------------------------------------------
+
+app.post('/api/match/photo', limit('photo', 10), requireUser, photoJson, wrap(async (req, res) => {
+  if (PHOTOS_MODE === 'off') return res.status(403).json({ error: 'photos_off' });
+  const m = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String((req.body && req.body.data) || ''));
+  if (!m || !PHOTO_MIME[m[1]]) return res.status(400).json({ error: 'bad_image' });
+  const buf = Buffer.from(m[2], 'base64');
+  if (!buf.length || buf.length > PHOTO_MAX) return res.status(413).json({ error: 'too_large' });
+  const own = store.listMatchPhotos((x) => x.owner === req.user.id && x.status !== 'rejected');
+  if (own.length >= PHOTOS_PER_PLAYER) return res.status(400).json({ error: 'too_many' });
+  const id = require('crypto').createHash('sha1').update(buf).digest('hex');
+  const prev = store.matchPhotoMeta(id);
+  if (prev && prev.owner !== req.user.id) return res.status(409).json({ error: 'taken' });
+  const status = PHOTOS_MODE === 'open' ? 'approved' : 'pending';
+  if (!prev) {
+    await store.putMatchPhoto(id, req.user.id, m[1], buf, status);
+    if (status === 'pending') console.log('[photos] %s sent a photo for approval (%s)', req.user.username, id.slice(0, 8));
+  }
+  res.json({ id, status: prev ? prev.status : status });
+}));
+
+// Approved photos are public; pending ones only for their owner and admins.
+app.get('/api/match/photo/:id', limit('brandimg', 600), optionalUser, wrap(async (req, res) => {
+  const id = String(req.params.id || '');
+  const meta = PHOTO_ID.test(id) && store.matchPhotoMeta(id);
+  if (!meta) return res.status(404).end();
+  const allowed = meta.status === 'approved' || (req.user && (req.user.id === meta.owner || isAdmin(req.user)));
+  if (!allowed) return res.status(404).end();
+  const img = await store.getMatchPhoto(id);
+  if (!img) return res.status(404).end();
+  res.setHeader('Content-Type', img.mime);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', meta.status === 'approved' ? 'public, max-age=3600' : 'private, no-store');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.end(img.data);
+}));
+
+function dropPhotoFromProfile(ownerId, id) {
+  const p = store.getMatchProfile(ownerId);
+  if (p && (p.photos || []).includes(id)) {
+    p.photos = p.photos.filter((x) => x !== id);
+    store.putMatchProfile(ownerId, p);
+  }
+}
+
+app.delete('/api/match/photo/:id', limit('photo', 30), requireUser, wrap(async (req, res) => {
+  const id = String(req.params.id || '');
+  const meta = PHOTO_ID.test(id) && store.matchPhotoMeta(id);
+  if (!meta || (meta.owner !== req.user.id && !isAdmin(req.user))) return res.status(404).json({ error: 'not_found' });
+  dropPhotoFromProfile(meta.owner, id);
+  await store.deleteMatchPhoto(id);
+  res.json({ ok: true });
+}));
+
+app.get('/api/admin/match/photos', limit('admin', 120), requireAdmin, (req, res) => {
+  const status = ['pending', 'approved', 'rejected'].includes(req.query.status) ? req.query.status : 'pending';
+  res.json({
+    mode: PHOTOS_MODE,
+    photos: store
+      .listMatchPhotos((m) => m.status === status)
+      .slice(0, 200)
+      .map((m) => ({ id: m.id, user: nameOf(m.owner), at: m.at, size: m.size, status: m.status })),
+  });
+});
+
+app.post('/api/admin/match/photos/:id', limit('admin', 240), requireAdmin, json, wrap(async (req, res) => {
+  const id = String(req.params.id || '');
+  const status = req.body && req.body.status;
+  if (!['approved', 'rejected'].includes(status)) return res.status(400).json({ error: 'bad_status' });
+  const meta = PHOTO_ID.test(id) && store.matchPhotoMeta(id);
+  if (!meta) return res.status(404).json({ error: 'not_found' });
+  await store.setMatchPhotoStatus(id, status);
+  if (status === 'rejected') dropPhotoFromProfile(meta.owner, id);
+  console.log('[photos] %s %s a photo of %s', req.user.username, status, nameOf(meta.owner));
+  res.json({ ok: true });
+}));
 
 app.get('/api/admin/match/reports', limit('admin', 60), requireAdmin, wrap(async (req, res) => {
   const list = await store.listMatchReports();

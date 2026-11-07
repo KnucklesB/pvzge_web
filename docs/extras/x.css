@@ -2005,3 +2005,168 @@ body.pvzx-open .mp-menu-account {
   align-items: center;
   padding: 3px 0;
 }
+
+/* plant match 2.3: player photos and profile customization */
+.pvzx-photo {
+  object-fit: cover;
+}
+.pvzx-players .pvzx-mavatar img.pvzx-photo,
+.pvzx-chat-head .pvzx-mavatar img.pvzx-photo,
+.pvzx-mavatar img[src^='blob:'] {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  object-fit: cover;
+}
+.pvzx-pgrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.pvzx-ptile {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #f0dcc0;
+  border: 2px solid #f0c9a0;
+}
+.pvzx-ptile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pvzx-ptile.pvzx-unused img {
+  opacity: 0.45;
+}
+.pvzx-ptile-badge {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+}
+.pvzx-ptile-btns {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  display: flex;
+  gap: 3px;
+}
+.pvzx-ptile-btns button {
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  font-size: 13px;
+}
+.pvzx-ptile.pvzx-padd {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border-style: dashed;
+  font-size: 26px;
+  cursor: pointer;
+  color: #8a4a12;
+  font-family: var(--mp-font);
+}
+.pvzx-ptile.pvzx-padd small {
+  font-size: 12px;
+}
+.pvzx-ptile.pvzx-mod small {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  color: #fff;
+  text-shadow: 0 1px 2px #000;
+  font-size: 11px;
+}
+.pvzx-swatches {
+  display: flex;
+  gap: 8px;
+}
+.pvzx-swatches button {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 1px #c9a27a;
+  cursor: pointer;
+}
+.pvzx-swatches button.pvzx-on {
+  box-shadow: 0 0 0 3px #2b1608;
+}
+.pvzx-prompt-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+.pvzx-prompt-edit select {
+  font-size: 13px;
+}
+.pvzx-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-left: 4px solid #ff3d8b;
+  border-radius: 10px;
+  background: #fff1e0;
+}
+.pvzx-prompt small {
+  color: #8a6a4d;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.pvzx-prompt b {
+  font-weight: normal;
+  font-size: 16px;
+}
+.pvzx-psheet-photo {
+  position: relative;
+  margin: 0 -12px 6px;
+  aspect-ratio: 4 / 5;
+  max-height: 340px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.pvzx-psheet-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pvzx-small-pic img {
+  width: 90px;
+}
+.pvzx-psheet > .pvzx-x,
+.pvzx-peditor > .pvzx-x {
+  margin-right: 8px;
+}
+.pvzx-psheet-photo + h3,
+.pvzx-psheet-pic + h3 {
+  clear: both;
+}
+.pvzx-psheet {
+  position: relative;
+}
+.pvzx-psheet > .pvzx-x {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 2;
+  float: none;
+  margin: 0;
+}
+.pvzx-psheet > .pvzx-psheet-pic {
+  padding-top: 26px;
+}

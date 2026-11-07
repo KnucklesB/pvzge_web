@@ -33,6 +33,8 @@
  *   match_profiles Plant Match player profiles (JSON), shown to others
  *   match_dms      private messages between players
  *   match_reports  players reported by others (for the admins)
+ *   match_photos   photos players upload for their profile (pending until an
+ *                  admin approves them, unless MATCH_PHOTOS=open)
  *   match_state    Plant Match progress of each account (JSON: partners,
  *                  chats, likes…), read on demand like the saves
  *
@@ -145,6 +147,17 @@ const SCHEMA = [
     read_at BIGINT NULL,
     KEY to_id (to_id, id),
     KEY from_id (from_id, id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS match_photos (
+    id CHAR(40) NOT NULL PRIMARY KEY,
+    user_id CHAR(36) NOT NULL,
+    mime VARCHAR(40) NOT NULL,
+    data MEDIUMBLOB NOT NULL,
+    size INT NOT NULL,
+    status VARCHAR(10) NOT NULL,
+    created_at BIGINT NOT NULL,
+    KEY user_id (user_id),
+    KEY status (status)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS match_reports (
     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -303,6 +316,12 @@ class MariaStore extends BaseStore {
     const mp = {};
     for (const r of await this.pool.query('SELECT * FROM match_profiles')) mp[r.user_id] = parseJson(r.data, {});
     this.db.matchProfiles = mp;
+    // Photo metadata in memory (the bytes stay in the database).
+    const photos = {};
+    for (const r of await this.pool.query('SELECT id, user_id, mime, size, status, created_at FROM match_photos')) {
+      photos[r.id] = { owner: r.user_id, mime: r.mime, size: r.size, at: Number(r.created_at), status: r.status };
+    }
+    this.db.matchPhotos = photos;
     this.index();
   }
 
@@ -489,6 +508,33 @@ class MariaStore extends BaseStore {
       excerpt: r.excerpt,
       at: Number(r.at),
     }));
+  }
+
+  async putMatchPhoto(id, owner, mime, buf, status) {
+    const at = Date.now();
+    await this.pool.query('REPLACE INTO match_photos (id, user_id, mime, data, size, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [id, owner, mime, buf, buf.length, status, at]);
+    this.db.matchPhotos[id] = { owner, mime, size: buf.length, at, status };
+  }
+
+  async getMatchPhoto(id) {
+    const m = this.matchPhotoMeta(id);
+    if (!m) return null;
+    const rows = await this.pool.query('SELECT data FROM match_photos WHERE id = ?', [id]);
+    return rows.length ? Object.assign({ data: rows[0].data }, m) : null;
+  }
+
+  async setMatchPhotoStatus(id, status) {
+    const m = this.matchPhotoMeta(id);
+    if (!m) return false;
+    m.status = status;
+    await this.pool.query('UPDATE match_photos SET status = ? WHERE id = ?', [status, id]);
+    return true;
+  }
+
+  async deleteMatchPhoto(id) {
+    if (!this.matchPhotoMeta(id)) return;
+    delete this.db.matchPhotos[id];
+    await this.pool.query('DELETE FROM match_photos WHERE id = ?', [id]);
   }
 
   persistMatchStats(rows) {
@@ -724,6 +770,17 @@ class MariaStore extends BaseStore {
           const r = await conn.query('INSERT IGNORE INTO achievements (user_id, achievement, unlocked_at) VALUES (?, ?, ?)', [uid, id, at]);
           out.achievements += r.affectedRows || 0;
         }
+      }
+      for (const [id, m] of Object.entries(db.matchPhotos || {})) {
+        const uid = idMap[m.owner];
+        if (!uid || !/^[a-f0-9]{40}$/.test(id)) continue;
+        let buf;
+        try {
+          buf = fs.readFileSync(path.join(dir, 'match-photos', id));
+        } catch (e) {
+          continue;
+        }
+        await conn.query('INSERT IGNORE INTO match_photos (id, user_id, mime, data, size, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [id, uid, m.mime, buf, buf.length, m.status || 'pending', m.at || Date.now()]);
       }
       for (const [userId, prof] of Object.entries(db.matchProfiles || {})) {
         const uid = idMap[userId];
