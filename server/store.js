@@ -25,6 +25,8 @@ const { newToken, hashToken } = require('./auth');
 const SESSION_TTL = 60 * 24 * 3600 * 1000;
 const MAX_MATCHES = 2000;
 const MAX_SCORES = 500; // kept per board
+const MAX_MATCH_PLANTS = 2000;
+const MAX_DMS = 20000; // private messages kept by the FileStore
 
 function atomicWrite(file, data) {
   const tmp = file + '.' + process.pid + '.tmp';
@@ -88,7 +90,7 @@ function normalizeSave(text) {
  */
 class BaseStore {
   constructor() {
-    this.db = { users: {}, sessions: {}, matches: [], secret: '', scores: {}, achievements: {} };
+    this.db = { users: {}, sessions: {}, matches: [], secret: '', scores: {}, achievements: {}, matchStats: {}, matchState: {}, matchProfiles: {}, dms: [], dmSeq: 0, matchReports: [], matchPhotos: {} };
     this.byName = new Map();
     setInterval(() => this.pruneSessions(), 3600 * 1000).unref();
   }
@@ -116,6 +118,11 @@ class BaseStore {
   persistMatch() {}
   persistScore() {}
   persistAchievements() {}
+  persistMatchStats() {}
+  persistMatchState() {}
+  persistMatchProfile() {}
+  persistDm() {}
+  persistMatchReport() {}
   checkWritable() {}
   flushSync() {}
   async close() {}
@@ -286,6 +293,172 @@ class BaseStore {
     });
   }
 
+  /* Plant Match: how often every plant was liked, matched, won a date…
+     (counters from every player; {code: {kind: n}}) */
+
+  addMatchStats(events) {
+    const stats = (this.db.matchStats = this.db.matchStats || {});
+    const changed = [];
+    for (const [code, kinds] of Object.entries(events)) {
+      if (!stats[code] && Object.keys(stats).length >= MAX_MATCH_PLANTS) continue;
+      const row = (stats[code] = stats[code] || {});
+      for (const [kind, n] of Object.entries(kinds)) {
+        row[kind] = (row[kind] || 0) + n;
+        changed.push([code, kind, row[kind]]);
+      }
+    }
+    if (changed.length) this.persistMatchStats(changed);
+  }
+
+  // Top plants of each kind: {kind: [{code, n}]}.
+  topMatchStats(kinds, limit) {
+    const stats = this.db.matchStats || {};
+    const out = {};
+    for (const kind of kinds) {
+      out[kind] = Object.entries(stats)
+        .filter(([, r]) => r[kind] > 0)
+        .map(([code, r]) => ({ code, n: r[kind] }))
+        .sort((a, b) => b.n - a.n || (a.code < b.code ? -1 : 1))
+        .slice(0, limit);
+    }
+    return out;
+  }
+
+  /* Plant Match progress of each account (partners, chats, likes…):
+     {userId: {data: JSON text, updatedAt}} */
+
+  async getMatchState(userId) {
+    const e = (this.db.matchState || {})[userId];
+    return e ? { data: e.data, updatedAt: e.updatedAt } : null;
+  }
+
+  async putMatchState(userId, data) {
+    this.db.matchState = this.db.matchState || {};
+    const updatedAt = Date.now();
+    this.db.matchState[userId] = { data, updatedAt };
+    this.persistMatchState(userId, data, updatedAt);
+    return updatedAt;
+  }
+
+  /* Plant Match players: profiles shown to other players and private
+     messages between them. FileStore keeps everything in db.json (the last
+     MAX_DMS messages); MariaStore overrides the messages with SQL. */
+
+  getMatchProfile(userId) {
+    return (this.db.matchProfiles || {})[userId] || null;
+  }
+
+  putMatchProfile(userId, prof) {
+    this.db.matchProfiles = this.db.matchProfiles || {};
+    this.db.matchProfiles[userId] = prof;
+    this.persistMatchProfile(userId, prof);
+    return prof;
+  }
+
+  listMatchProfiles() {
+    return Object.entries(this.db.matchProfiles || {}).map(([userId, p]) => Object.assign({ userId }, p));
+  }
+
+  async addDm(fromId, toId, text) {
+    const m = { id: ++this.db.dmSeq, from: fromId, to: toId, text, at: Date.now(), read: 0 };
+    this.db.dms.push(m);
+    if (this.db.dms.length > MAX_DMS) this.db.dms.splice(0, this.db.dms.length - MAX_DMS);
+    this.persistDm(m);
+    return m;
+  }
+
+  // Messages to or from the account after an id (the last `limit` ones).
+  async listDms(userId, afterId, limit) {
+    const list = this.db.dms.filter((m) => m.id > afterId && (m.from === userId || m.to === userId));
+    return list.slice(-limit).map((m) => Object.assign({}, m));
+  }
+
+  async markDmsRead(toId, fromId) {
+    const now = Date.now();
+    let n = 0;
+    for (const m of this.db.dms) {
+      if (m.to === toId && m.from === fromId && !m.read) {
+        m.read = now;
+        n++;
+      }
+    }
+    if (n) this.persistDm(null);
+    return n;
+  }
+
+  // Per correspondent: the last id of the account's messages they have read.
+  async lastReads(userId) {
+    const out = {};
+    for (const m of this.db.dms) {
+      if (m.from === userId && m.read && (!out[m.to] || m.id > out[m.to])) out[m.to] = m.id;
+    }
+    return out;
+  }
+
+  addMatchReport(r) {
+    this.db.matchReports = this.db.matchReports || [];
+    this.db.matchReports.push(r);
+    if (this.db.matchReports.length > 1000) this.db.matchReports.shift();
+    this.persistMatchReport(r);
+  }
+
+  async listMatchReports() {
+    return (this.db.matchReports || []).slice().reverse();
+  }
+
+  /* Player photos: {id: {owner, mime, size, at, status}} (status pending,
+     approved or rejected); FileStore keeps the bytes in DATA_DIR/match-photos. */
+
+  photosDir() {
+    const dir = path.join(this.dir, 'match-photos');
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  matchPhotoMeta(id) {
+    return (this.db.matchPhotos || {})[id] || null;
+  }
+
+  listMatchPhotos(filter) {
+    return Object.entries(this.db.matchPhotos || {})
+      .map(([id, m]) => Object.assign({ id }, m))
+      .filter(filter || (() => true))
+      .sort((a, b) => a.at - b.at);
+  }
+
+  async putMatchPhoto(id, owner, mime, buf, status) {
+    atomicWrite(path.join(this.photosDir(), id), buf);
+    this.db.matchPhotos[id] = { owner, mime, size: buf.length, at: Date.now(), status };
+    this.dirty();
+  }
+
+  async getMatchPhoto(id) {
+    const m = this.matchPhotoMeta(id);
+    if (!m) return null;
+    try {
+      return Object.assign({ data: fs.readFileSync(path.join(this.photosDir(), id)) }, m);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async setMatchPhotoStatus(id, status) {
+    const m = this.matchPhotoMeta(id);
+    if (!m) return false;
+    m.status = status;
+    this.dirty();
+    return true;
+  }
+
+  async deleteMatchPhoto(id) {
+    if (!this.matchPhotoMeta(id)) return;
+    delete this.db.matchPhotos[id];
+    try {
+      fs.unlinkSync(path.join(this.photosDir(), id));
+    } catch (e) {}
+    this.dirty();
+  }
+
   /* achievements: {id: unlockedAt} per account */
 
   getAchievements(userId) {
@@ -365,6 +538,21 @@ class FileStore extends BaseStore {
     this.dirty();
   }
   persistAchievements() {
+    this.dirty();
+  }
+  persistMatchStats() {
+    this.dirty();
+  }
+  persistMatchState() {
+    this.dirty();
+  }
+  persistMatchProfile() {
+    this.dirty();
+  }
+  persistDm() {
+    this.dirty();
+  }
+  persistMatchReport() {
     this.dirty();
   }
 

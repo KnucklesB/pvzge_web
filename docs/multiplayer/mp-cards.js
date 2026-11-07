@@ -116,6 +116,13 @@
             zAtlas: parseAtlas(a[1].atlasJson),
             zImg: imgs[0],
             bg: parseArmature(a[2].dragonBonesJson, 'background', 'bk'),
+            plants: (function () {
+              try {
+                return parseArmature(a[2].dragonBonesJson, 'plants', 'plant_body');
+              } catch (e) {
+                return null;
+              }
+            })(),
             bgAtlas: parseAtlas(a[3].atlasJson),
             bgImg: imgs[1],
           };
@@ -220,6 +227,48 @@
     ctx.restore();
     return c;
   }
+
+  // A plant seed packet (the same packet art as the game's seed chooser):
+  // world background + portrait from the SeedPacker 'plants' armature.
+  // Returns a canvas, or null before cards.load() resolved / for plants
+  // without a portrait.
+  cards.plantCanvas = function (code) {
+    if (!cards.ready || !data.plants) return null;
+    var f = null;
+    try {
+      var P = G.m.Plants;
+      Object.keys(P.PlantEnum).some(function (k) {
+        if (!isNaN(+k)) return false;
+        var x = P.plants.getPlantFeature(P.PlantEnum[k]);
+        if (x && x.CODENAME === code) f = x;
+        return !!f;
+      });
+    } catch (e) {}
+    var pi = data.plants.anims[(f && f._CARDSPRITENAME) || code];
+    var pd = pi != null && data.plants.displays[pi];
+    var ps = pd && data.bgAtlas[pd.name];
+    var bi = data.bg.anims[bgAnimFor(f && f.OBTAINWORLD)];
+    if (bi == null) bi = data.bg.anims.homeless;
+    var bd = data.bg.displays[bi];
+    var bs = bd && data.bgAtlas[bd.name];
+    if (!ps || !bs) return null;
+    var w = bs.frameWidth || bs.width;
+    var h = bs.frameHeight || bs.height;
+    var c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    var ctx = c.getContext('2d');
+    var bt = bd.transform || {};
+    drawRegion(ctx, data.bgImg, bs, w / 2 + (bt.x || 0), h / 2 + (bt.y || 0), bt.scX || 1);
+    var pt = pd.transform || {};
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(9, 9, w - 18, h - 18);
+    ctx.clip();
+    drawRegion(ctx, data.bgImg, ps, w / 2 + (pt.x || 0), h / 2 + (pt.y || 0), pt.scX || 1);
+    ctx.restore();
+    return c;
+  };
 
   // Packets are drawn a few at a time and PNG-encoded asynchronously, so
   // opening the chooser (200+ zombies) never blocks the page.

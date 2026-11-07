@@ -29,6 +29,14 @@
  *   achievements   unlocked achievements per account
  *   branding_images  logos / images uploaded by admins (meta 'branding'
  *                  holds which game image each one replaces)
+ *   match_stats    Plant Match counters per plant (likes, matches, dates…)
+ *   match_profiles Plant Match player profiles (JSON), shown to others
+ *   match_dms      private messages between players
+ *   match_reports  players reported by others (for the admins)
+ *   match_photos   photos players upload for their profile (pending until an
+ *                  admin approves them, unless MATCH_PHOTOS=open)
+ *   match_state    Plant Match progress of each account (JSON: partners,
+ *                  chats, likes…), read on demand like the saves
  *
  * Users, sessions and recent matches are cached in memory (loaded at start);
  * every change is written through. Saves are always read from the database.
@@ -124,6 +132,51 @@ const SCHEMA = [
     achievement VARCHAR(48) NOT NULL,
     unlocked_at BIGINT NOT NULL,
     PRIMARY KEY (user_id, achievement)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS match_profiles (
+    user_id CHAR(36) NOT NULL PRIMARY KEY,
+    data LONGTEXT NOT NULL,
+    updated_at BIGINT NOT NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS match_dms (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    from_id CHAR(36) NOT NULL,
+    to_id CHAR(36) NOT NULL,
+    text TEXT NOT NULL,
+    at BIGINT NOT NULL,
+    read_at BIGINT NULL,
+    KEY to_id (to_id, id),
+    KEY from_id (from_id, id)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS match_photos (
+    id CHAR(40) NOT NULL PRIMARY KEY,
+    user_id CHAR(36) NOT NULL,
+    mime VARCHAR(40) NOT NULL,
+    data MEDIUMBLOB NOT NULL,
+    size INT NOT NULL,
+    status VARCHAR(10) NOT NULL,
+    created_at BIGINT NOT NULL,
+    KEY user_id (user_id),
+    KEY status (status)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS match_reports (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    reporter_id CHAR(36) NOT NULL,
+    target_id CHAR(36) NOT NULL,
+    reason VARCHAR(200) NOT NULL,
+    excerpt TEXT NULL,
+    at BIGINT NOT NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS match_state (
+    user_id CHAR(36) NOT NULL PRIMARY KEY,
+    data LONGTEXT NOT NULL,
+    updated_at BIGINT NOT NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+  `CREATE TABLE IF NOT EXISTS match_stats (
+    code VARCHAR(48) NOT NULL,
+    kind VARCHAR(16) NOT NULL,
+    n BIGINT NOT NULL,
+    PRIMARY KEY (code, kind)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
   `CREATE TABLE IF NOT EXISTS branding_images (
     id CHAR(40) NOT NULL PRIMARY KEY,
@@ -257,6 +310,18 @@ class MariaStore extends BaseStore {
       (ach[r.user_id] = ach[r.user_id] || {})[r.achievement] = Number(r.unlocked_at);
     }
     this.db.achievements = ach;
+    const ms = {};
+    for (const r of await this.pool.query('SELECT * FROM match_stats')) (ms[r.code] = ms[r.code] || {})[r.kind] = Number(r.n);
+    this.db.matchStats = ms;
+    const mp = {};
+    for (const r of await this.pool.query('SELECT * FROM match_profiles')) mp[r.user_id] = parseJson(r.data, {});
+    this.db.matchProfiles = mp;
+    // Photo metadata in memory (the bytes stay in the database).
+    const photos = {};
+    for (const r of await this.pool.query('SELECT id, user_id, mime, size, status, created_at FROM match_photos')) {
+      photos[r.id] = { owner: r.user_id, mime: r.mime, size: r.size, at: Number(r.created_at), status: r.status };
+    }
+    this.db.matchPhotos = photos;
     this.index();
   }
 
@@ -380,6 +445,100 @@ class MariaStore extends BaseStore {
         pairs.map(([id, at]) => [userId, id, at]),
       ),
     );
+  }
+
+  // Read from the database (not cached), like the saves.
+  async getMatchState(userId) {
+    const rows = await this.pool.query('SELECT data, updated_at FROM match_state WHERE user_id = ?', [userId]);
+    return rows.length ? { data: rows[0].data, updatedAt: Number(rows[0].updated_at) } : null;
+  }
+
+  async putMatchState(userId, data) {
+    const updatedAt = Date.now();
+    await this.pool.query('REPLACE INTO match_state (user_id, data, updated_at) VALUES (?, ?, ?)', [userId, data, updatedAt]);
+    return updatedAt;
+  }
+
+  persistMatchProfile(userId, prof) {
+    return this.enqueue('match profile', (db) =>
+      db.query('REPLACE INTO match_profiles (user_id, data, updated_at) VALUES (?, ?, ?)', [userId, JSON.stringify(prof), Date.now()]),
+    );
+  }
+
+  async addDm(fromId, toId, text) {
+    const at = Date.now();
+    const r = await this.pool.query('INSERT INTO match_dms (from_id, to_id, text, at) VALUES (?, ?, ?, ?)', [fromId, toId, text, at]);
+    return { id: Number(r.insertId), from: fromId, to: toId, text, at, read: 0 };
+  }
+
+  async listDms(userId, afterId, limit) {
+    const rows = await this.pool.query(
+      `SELECT * FROM (
+         SELECT * FROM match_dms WHERE id > ? AND (from_id = ? OR to_id = ?) ORDER BY id DESC LIMIT ?
+       ) t ORDER BY id ASC`,
+      [afterId, userId, userId, limit],
+    );
+    return rows.map((r) => ({ id: Number(r.id), from: r.from_id, to: r.to_id, text: r.text, at: Number(r.at), read: r.read_at == null ? 0 : Number(r.read_at) }));
+  }
+
+  async markDmsRead(toId, fromId) {
+    const r = await this.pool.query('UPDATE match_dms SET read_at = ? WHERE to_id = ? AND from_id = ? AND read_at IS NULL', [Date.now(), toId, fromId]);
+    return r.affectedRows || 0;
+  }
+
+  async lastReads(userId) {
+    const out = {};
+    for (const r of await this.pool.query('SELECT to_id, MAX(id) AS id FROM match_dms WHERE from_id = ? AND read_at IS NOT NULL GROUP BY to_id', [userId])) {
+      out[r.to_id] = Number(r.id);
+    }
+    return out;
+  }
+
+  addMatchReport(r) {
+    return this.enqueue('match report', (db) =>
+      db.query('INSERT INTO match_reports (reporter_id, target_id, reason, excerpt, at) VALUES (?, ?, ?, ?, ?)', [r.reporter, r.target, r.reason, r.excerpt || null, r.at]),
+    );
+  }
+
+  async listMatchReports() {
+    return (await this.pool.query('SELECT * FROM match_reports ORDER BY id DESC LIMIT 500')).map((r) => ({
+      reporter: r.reporter_id,
+      target: r.target_id,
+      reason: r.reason,
+      excerpt: r.excerpt,
+      at: Number(r.at),
+    }));
+  }
+
+  async putMatchPhoto(id, owner, mime, buf, status) {
+    const at = Date.now();
+    await this.pool.query('REPLACE INTO match_photos (id, user_id, mime, data, size, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [id, owner, mime, buf, buf.length, status, at]);
+    this.db.matchPhotos[id] = { owner, mime, size: buf.length, at, status };
+  }
+
+  async getMatchPhoto(id) {
+    const m = this.matchPhotoMeta(id);
+    if (!m) return null;
+    const rows = await this.pool.query('SELECT data FROM match_photos WHERE id = ?', [id]);
+    return rows.length ? Object.assign({ data: rows[0].data }, m) : null;
+  }
+
+  async setMatchPhotoStatus(id, status) {
+    const m = this.matchPhotoMeta(id);
+    if (!m) return false;
+    m.status = status;
+    await this.pool.query('UPDATE match_photos SET status = ? WHERE id = ?', [status, id]);
+    return true;
+  }
+
+  async deleteMatchPhoto(id) {
+    if (!this.matchPhotoMeta(id)) return;
+    delete this.db.matchPhotos[id];
+    await this.pool.query('DELETE FROM match_photos WHERE id = ?', [id]);
+  }
+
+  persistMatchStats(rows) {
+    return this.enqueue('match stats', (db) => db.batch('REPLACE INTO match_stats (code, kind, n) VALUES (?, ?, ?)', rows));
   }
 
   /* saves */
@@ -610,6 +769,46 @@ class MariaStore extends BaseStore {
         for (const [id, at] of Object.entries(map)) {
           const r = await conn.query('INSERT IGNORE INTO achievements (user_id, achievement, unlocked_at) VALUES (?, ?, ?)', [uid, id, at]);
           out.achievements += r.affectedRows || 0;
+        }
+      }
+      for (const [id, m] of Object.entries(db.matchPhotos || {})) {
+        const uid = idMap[m.owner];
+        if (!uid || !/^[a-f0-9]{40}$/.test(id)) continue;
+        let buf;
+        try {
+          buf = fs.readFileSync(path.join(dir, 'match-photos', id));
+        } catch (e) {
+          continue;
+        }
+        await conn.query('INSERT IGNORE INTO match_photos (id, user_id, mime, data, size, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)', [id, uid, m.mime, buf, buf.length, m.status || 'pending', m.at || Date.now()]);
+      }
+      for (const [userId, prof] of Object.entries(db.matchProfiles || {})) {
+        const uid = idMap[userId];
+        if (uid) await conn.query('INSERT IGNORE INTO match_profiles (user_id, data, updated_at) VALUES (?, ?, ?)', [uid, JSON.stringify(prof), Date.now()]);
+      }
+      if (!opts.skipDms) {
+        for (const m of db.dms || []) {
+          const from = idMap[m.from];
+          const to = idMap[m.to];
+          if (!from || !to) continue;
+          const dup = await conn.query('SELECT id FROM match_dms WHERE from_id = ? AND to_id = ? AND at = ? LIMIT 1', [from, to, m.at]);
+          if (!dup.length) await conn.query('INSERT INTO match_dms (from_id, to_id, text, at, read_at) VALUES (?, ?, ?, ?, ?)', [from, to, m.text, m.at, m.read || null]);
+        }
+      }
+      for (const [userId, e] of Object.entries(db.matchState || {})) {
+        const uid = idMap[userId];
+        if (!uid || !e || typeof e.data !== 'string') continue;
+        // Keep the newer progress.
+        await conn.query(
+          `INSERT INTO match_state (user_id, data, updated_at) VALUES (?, ?, ?)
+           ON DUPLICATE KEY UPDATE data = IF(VALUES(updated_at) > updated_at, VALUES(data), data), updated_at = GREATEST(updated_at, VALUES(updated_at))`,
+          [uid, e.data, Number(e.updatedAt) || 0],
+        );
+      }
+      for (const [code, kinds] of Object.entries(db.matchStats || {})) {
+        for (const [kind, n] of Object.entries(kinds || {})) {
+          // Keep the larger counter (the import is safe to repeat).
+          await conn.query('INSERT INTO match_stats (code, kind, n) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE n = GREATEST(n, VALUES(n))', [code, kind, Number(n) || 0]);
         }
       }
       await conn.commit();
