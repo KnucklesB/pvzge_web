@@ -101,8 +101,17 @@ PC as the guest) keeps the match running.
 | GET/PUT | `/api/admin/users/:name/save` | admin: read / replace a player's cloud save (previous one backed up) |
 | GET | `/api/rooms` | public rooms (hosts heartbeat with `PUT /api/rooms/:code` + secret key) |
 | GET/POST | `/api/matches` | history; only the live room's host (key) can report a result |
+| GET | `/api/save/history`, `/api/save/profiles` | earlier versions of the player's save; its profiles (coins, gems...) |
+| POST | `/api/save/restore` | `{id}`: restore an earlier version (the current one is archived) |
+| GET/POST | `/api/admin/users/:name/history[/:id]`, `/api/admin/users/:name/restore` | admin: a player's save history |
+| GET | `/api/daily` | `{date, seed}` of the daily challenge (server date) |
+| GET/POST | `/api/scores/:board` | leaderboards `daily:YYYY-MM-DD`, `survival`; posting keeps each account's best |
+| GET/PUT | `/api/achievements` | the account's achievements; PUT `{ids}` merges (never removes) |
+| GET | `/api/branding`, `/api/branding/img/:id` | logos / images replacing the game's (immutable images, cached) |
+| POST/PUT | `/api/admin/branding/img`, `/api/admin/branding` | admin: upload an image (`{data: dataURL}` → `{id}`), save the branding config |
 
-Passwords are hashed with scrypt, sessions are random bearer tokens stored
+Storage is files in `DATA_DIR` or MariaDB (`DB_HOST` / `DATABASE_URL`, see
+`server/db-mariadb.js`). Passwords are hashed with scrypt, sessions are random bearer tokens stored
 hashed, and auth/save endpoints are rate limited.
 
 Testing locally: serve `docs/`, run `server/` (`HOST=127.0.0.1 PORT=9000 npm start`)

@@ -29,8 +29,9 @@ for (const commit of base.split(',')) {
     .forEach((l) => changed.add(l.slice(2).replace(/^docs\//, '')));
 }
 const refresh = [...changed]
-  // The page and the multiplayer files are never cached without revalidation.
-  .filter((p) => p !== 'index.html' && p !== 'version.json' && !p.startsWith('multiplayer/'))
+  // The page, the multiplayer and the extras files are never cached without
+  // revalidation (their URLs carry their version).
+  .filter((p) => p !== 'index.html' && p !== 'version.json' && !p.startsWith('multiplayer/') && !p.startsWith('extras/'))
   .sort();
 fs.writeFileSync(path.join(root, 'docs', 'version.json'), JSON.stringify({ build, refresh }, null, 1) + '\n');
 console.log('docs/version.json: build %s, %d files to refresh', build, refresh.length);

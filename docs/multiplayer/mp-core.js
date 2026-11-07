@@ -5,7 +5,7 @@
   'use strict';
 
   var MP = (window.PvZMP = window.PvZMP || {});
-  MP.VERSION = '3.2.1';
+  MP.VERSION = '3.3.2';
   MP.PROTOCOL = 3;
 
   /* ------------------------------------------------------------------ config */
